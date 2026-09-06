@@ -51,6 +51,27 @@ export const inventoryService = {
     const response = await api.delete(`/inventory/${id}`);
     return response.data.data;
   },
+
+  /**
+   * Get deterministic sales velocity & low-stock intelligence analysis
+   * @param {number} [days] - Optional analysis window in days (default 7)
+   */
+  async getAnalysis(days) {
+    const params = days ? { days } : {};
+    const response = await api.get("/inventory/analysis", { params });
+    return response.data.data;
+  },
+
+  /**
+   * Get deterministic analysis for a single inventory item
+   * @param {string} id - Inventory item ID
+   * @param {number} [days] - Optional analysis window in days
+   */
+  async getItemAnalysis(id, days) {
+    const params = days ? { days } : {};
+    const response = await api.get(`/inventory/${id}/analysis`, { params });
+    return response.data.data;
+  },
 };
 
 export default inventoryService;

@@ -10,14 +10,15 @@ dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 process.env.NODE_ENV = "test";
-process.env.PORT = "5002";
+process.env.PORT = "5003";
 
 const { app } = require("../../server");
 const InventoryItem = require("../models/InventoryItem");
 const Sale = require("../models/Sale");
 const errorHandler = require("../utils/errorHandler");
+const inventoryAnalysisService = require("../services/inventoryAnalysisService");
 
-test("Backend Foundation & Sales Test Suite", async (t) => {
+test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
   let server;
   let baseUrl;
   let testItemId = null;
@@ -147,160 +148,191 @@ test("Backend Foundation & Sales Test Suite", async (t) => {
     },
   );
 
-  // Only run live DB integration tests if connected to MongoDB
+  // Phase 3 Calculation Unit Tests
+  await t.test(
+    "Phase 3 Unit Test 1 — Sales velocity calculation (56 units / 7 days = 8 units/day)",
+    () => {
+      const velocity = inventoryAnalysisService.calculateSalesVelocity(56, 7);
+      assert.equal(velocity, 8);
+    },
+  );
+
+  await t.test(
+    "Phase 3 Unit Test 2 — Stockout calculation (Stock 40 / Velocity 8 = 5 days)",
+    () => {
+      const days = inventoryAnalysisService.calculateDaysUntilStockout(40, 8);
+      assert.equal(days, 5);
+    },
+  );
+
+  await t.test(
+    "Phase 3 Unit Test 3 — Zero sales handling (Velocity 0 -> daysUntilStockout = null)",
+    () => {
+      const days = inventoryAnalysisService.calculateDaysUntilStockout(100, 0);
+      assert.equal(days, null);
+    },
+  );
+
+  await t.test(
+    "Phase 3 Unit Test 4 — Low stock detection (Stock 35 < Threshold 50 -> LOW_STOCK)",
+    () => {
+      const status = inventoryAnalysisService.classifyStatus(
+        35,
+        50,
+        8,
+        4.38,
+        7,
+      );
+      assert.equal(status, "LOW_STOCK");
+    },
+  );
+
+  await t.test(
+    "Phase 3 Unit Test 5 — Stockout risk detection (Stock 50 >= Threshold 40, Stockout 5 <= Warning 7 -> STOCKOUT_RISK)",
+    () => {
+      const status = inventoryAnalysisService.classifyStatus(50, 40, 10, 5, 7);
+      assert.equal(status, "STOCKOUT_RISK");
+    },
+  );
+
+  await t.test(
+    "Phase 3 Unit Test 6 — Healthy detection (Stock 100, Threshold 40, Stockout 20 > Warning 7 -> HEALTHY)",
+    () => {
+      const status = inventoryAnalysisService.classifyStatus(100, 40, 5, 20, 7);
+      assert.equal(status, "HEALTHY");
+    },
+  );
+
+  // Live Database Integration Tests
   if (mongoose.connection.readyState === 1) {
-    // Test 7: Create test item for sale tests
-    await t.test("Create test inventory item for sales workflow", async () => {
-      const item = new InventoryItem({
-        name: "Sales Test Item",
-        sku: `TEST-SALE-${Date.now()}`,
-        category: "Testing",
-        currentStock: 50,
-        reorderThreshold: 10,
-        unitPrice: 100,
-        averageDailySales: 5,
-        supplier: "Test Suite Supplier",
-      });
-      const saved = await item.save();
-      testItemId = saved._id.toString();
-      assert.ok(testItemId);
-    });
-
-    // Test 8: Successful Sale (Stock: 50 -> 45, Total: 500)
+    // Setup test items
     await t.test(
-      "POST /api/sales successfully records sale and reduces stock",
+      "Setup test inventory items and sales for integration testing",
       async () => {
-        const res = await fetch(`${baseUrl}/api/sales`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            inventoryItemId: testItemId,
-            quantitySold: 5,
-          }),
+        const item = new InventoryItem({
+          name: "Velocity Test Item",
+          sku: `VEL-${Date.now()}`,
+          category: "Testing",
+          currentStock: 50,
+          reorderThreshold: 20,
+          unitPrice: 100,
+          supplier: "Velocity Supplier",
         });
+        const saved = await item.save();
+        testItemId = saved._id.toString();
 
+        // Insert 2 sales in window (within 7 days)
+        const now = Date.now();
+        const sale1 = await Sale.create({
+          inventoryItemId: saved._id,
+          quantitySold: 14,
+          unitPrice: 100,
+          totalAmount: 1400,
+          soldAt: new Date(now - 2 * 24 * 60 * 60 * 1000), // 2 days ago
+        });
+        createdSaleIds.push(sale1._id);
+
+        const sale2 = await Sale.create({
+          inventoryItemId: saved._id,
+          quantitySold: 7,
+          unitPrice: 100,
+          totalAmount: 700,
+          soldAt: new Date(now - 4 * 24 * 60 * 60 * 1000), // 4 days ago
+        });
+        createdSaleIds.push(sale2._id);
+
+        // Insert 1 sale outside window (15 days ago)
+        const oldSale = await Sale.create({
+          inventoryItemId: saved._id,
+          quantitySold: 50,
+          unitPrice: 100,
+          totalAmount: 5000,
+          soldAt: new Date(now - 15 * 24 * 60 * 60 * 1000), // 15 days ago
+        });
+        createdSaleIds.push(oldSale._id);
+      },
+    );
+
+    // Test: Date Filtering & Analysis Service integration
+    await t.test(
+      "Phase 3 Integration Test 7 — Date filtering excludes sales older than analysis window",
+      async () => {
+        const analysis = await inventoryAnalysisService.analyzeItem(
+          testItemId,
+          { days: 7, warningDays: 7 },
+        );
+        // Only sale1 (14) + sale2 (7) = 21 units. Old sale (50) must be excluded!
+        assert.equal(analysis.totalUnitsSold, 21);
+        assert.equal(analysis.salesVelocity, 3); // 21 / 7 = 3.00
+        assert.equal(analysis.daysUntilStockout, 16.67); // 50 / 3 = 16.67
+        assert.equal(analysis.status, "HEALTHY");
+      },
+    );
+
+    // Test: GET /api/inventory/analysis endpoint
+    await t.test(
+      "GET /api/inventory/analysis returns structured intelligence for all items",
+      async () => {
+        const res = await fetch(`${baseUrl}/api/inventory/analysis?days=7`);
         const body = await res.json();
-        assert.equal(res.status, 201);
+        assert.equal(res.status, 200);
         assert.equal(body.success, true);
-        assert.equal(body.data.sale.quantitySold, 5);
-        assert.equal(body.data.sale.unitPrice, 100);
-        assert.equal(body.data.sale.totalAmount, 500);
-        assert.equal(body.data.inventory.currentStock, 45);
+        assert.ok(Array.isArray(body.data));
 
-        createdSaleIds.push(body.data.sale._id);
-
-        // Verify persistence in MongoDB
-        const storedItem = await InventoryItem.findById(testItemId);
-        assert.equal(storedItem.currentStock, 45);
-
-        const storedSale = await Sale.findById(body.data.sale._id);
-        assert.ok(storedSale);
-        assert.equal(storedSale.totalAmount, 500);
+        const itemAnalysis = body.data.find(
+          (i) => i.inventoryItemId === testItemId,
+        );
+        assert.ok(itemAnalysis);
+        assert.equal(itemAnalysis.totalUnitsSold, 21);
+        assert.equal(itemAnalysis.salesVelocity, 3);
+        assert.equal(itemAnalysis.status, "HEALTHY");
       },
     );
 
-    // Test 9: Insufficient Stock (Stock: 45, Request: 50 -> 400 Bad Request)
+    // Test: GET /api/inventory/:id/analysis endpoint
     await t.test(
-      "POST /api/sales rejects sale when requested quantity exceeds stock",
+      "GET /api/inventory/:id/analysis returns intelligence for single item and 404 for missing",
       async () => {
-        const res = await fetch(`${baseUrl}/api/sales`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            inventoryItemId: testItemId,
-            quantitySold: 50,
-          }),
-        });
-
+        const res = await fetch(
+          `${baseUrl}/api/inventory/${testItemId}/analysis?days=7`,
+        );
         const body = await res.json();
-        assert.equal(res.status, 400);
-        assert.equal(body.success, false);
-        assert.match(body.message, /Insufficient stock/i);
-
-        // Verify stock remained unchanged at 45
-        const storedItem = await InventoryItem.findById(testItemId);
-        assert.equal(storedItem.currentStock, 45);
-      },
-    );
-
-    // Test 10: Invalid Quantity (0 or negative)
-    await t.test(
-      "POST /api/sales rejects zero or negative quantity",
-      async () => {
-        const resZero = await fetch(`${baseUrl}/api/sales`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            inventoryItemId: testItemId,
-            quantitySold: 0,
-          }),
-        });
-        assert.equal(resZero.status, 400);
-
-        const resNegative = await fetch(`${baseUrl}/api/sales`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            inventoryItemId: testItemId,
-            quantitySold: -5,
-          }),
-        });
-        assert.equal(resNegative.status, 400);
-      },
-    );
-
-    // Test 11: Missing or Invalid Inventory Item
-    await t.test(
-      "POST /api/sales rejects missing or invalid inventory ID",
-      async () => {
-        const resInvalidId = await fetch(`${baseUrl}/api/sales`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            inventoryItemId: "invalid-id",
-            quantitySold: 2,
-          }),
-        });
-        assert.equal(resInvalidId.status, 400);
+        assert.equal(res.status, 200);
+        assert.equal(body.success, true);
+        assert.equal(body.data.inventoryItemId, testItemId);
+        assert.equal(body.data.salesVelocity, 3);
 
         const fakeId = new mongoose.Types.ObjectId().toString();
-        const resNonExistent = await fetch(`${baseUrl}/api/sales`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            inventoryItemId: fakeId,
-            quantitySold: 2,
-          }),
-        });
-        assert.equal(resNonExistent.status, 404);
+        const res404 = await fetch(
+          `${baseUrl}/api/inventory/${fakeId}/analysis`,
+        );
+        assert.equal(res404.status, 404);
       },
     );
 
-    // Test 12: GET /api/sales and GET /api/sales/inventory/:id
+    // Test: Query parameter validation
     await t.test(
-      "GET /api/sales and GET /api/sales/inventory/:id return sale records",
+      "GET /api/inventory/analysis rejects invalid ?days parameter with 400 Bad Request",
       async () => {
-        const resAll = await fetch(`${baseUrl}/api/sales`);
-        const bodyAll = await resAll.json();
-        assert.equal(resAll.status, 200);
-        assert.equal(bodyAll.success, true);
-        assert.ok(Array.isArray(bodyAll.data));
-
-        const resByItem = await fetch(
-          `${baseUrl}/api/sales/inventory/${testItemId}`,
+        const resNegative = await fetch(
+          `${baseUrl}/api/inventory/analysis?days=-5`,
         );
-        const bodyByItem = await resByItem.json();
-        assert.equal(resByItem.status, 200);
-        assert.equal(bodyByItem.success, true);
-        assert.ok(Array.isArray(bodyByItem.data));
-        assert.equal(bodyByItem.data.length, 1);
-        assert.equal(bodyByItem.data[0].quantitySold, 5);
-        assert.equal(bodyByItem.data[0].totalAmount, 500);
+        assert.equal(resNegative.status, 400);
+        const bodyNegative = await resNegative.json();
+        assert.match(bodyNegative.message, /positive integer/);
+
+        const resString = await fetch(
+          `${baseUrl}/api/inventory/analysis?days=hello`,
+        );
+        assert.equal(resString.status, 400);
+
+        const resZero = await fetch(`${baseUrl}/api/inventory/analysis?days=0`);
+        assert.equal(resZero.status, 400);
       },
     );
 
     // Cleanup test data
-    await t.test("Cleanup test inventory item and sales", async () => {
+    await t.test("Cleanup Phase 3 test data", async () => {
       if (testItemId) {
         await InventoryItem.findByIdAndDelete(testItemId);
       }

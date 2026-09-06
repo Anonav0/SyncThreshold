@@ -1,6 +1,25 @@
 const inventoryService = require("../services/inventoryService");
+const inventoryAnalysisService = require("../services/inventoryAnalysisService");
 const asyncHandler = require("../utils/asyncHandler");
 const { sendSuccess, sendError } = require("../utils/apiResponse");
+
+/**
+ * Helper to parse and validate optional ?days= query parameter
+ */
+const parseDaysParam = (queryDays) => {
+  if (queryDays === undefined || queryDays === null || queryDays === "") {
+    return undefined;
+  }
+  const parsed = Number(queryDays);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    const error = new Error(
+      'Query parameter "days" must be a positive integer greater than 0',
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+  return parsed;
+};
 
 /**
  * @desc    Get all inventory items
@@ -10,6 +29,17 @@ const { sendSuccess, sendError } = require("../utils/apiResponse");
 const getInventory = asyncHandler(async (req, res) => {
   const items = await inventoryService.getAllItems();
   return sendSuccess(res, items, 200);
+});
+
+/**
+ * @desc    Get inventory velocity & low-stock intelligence analysis for all items
+ * @route   GET /api/inventory/analysis
+ * @access  Public
+ */
+const getInventoryAnalysis = asyncHandler(async (req, res) => {
+  const days = parseDaysParam(req.query.days);
+  const analysis = await inventoryAnalysisService.analyzeAllInventory({ days });
+  return sendSuccess(res, analysis, 200);
 });
 
 /**
@@ -25,6 +55,19 @@ const getInventoryItemById = asyncHandler(async (req, res) => {
   }
 
   return sendSuccess(res, item, 200);
+});
+
+/**
+ * @desc    Get velocity & low-stock intelligence analysis for a single item
+ * @route   GET /api/inventory/:id/analysis
+ * @access  Public
+ */
+const getSingleInventoryAnalysis = asyncHandler(async (req, res) => {
+  const days = parseDaysParam(req.query.days);
+  const analysis = await inventoryAnalysisService.analyzeItem(req.params.id, {
+    days,
+  });
+  return sendSuccess(res, analysis, 200);
 });
 
 /**
@@ -101,7 +144,9 @@ const deleteInventoryItem = asyncHandler(async (req, res) => {
 
 module.exports = {
   getInventory,
+  getInventoryAnalysis,
   getInventoryItemById,
+  getSingleInventoryAnalysis,
   createInventoryItem,
   updateInventoryItem,
   deleteInventoryItem,

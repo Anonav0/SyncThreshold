@@ -5,50 +5,76 @@ import {
   CheckCircle2,
   ArrowRight,
   ShieldCheck,
-  Database,
-  Server,
   ShoppingCart,
   DollarSign,
   TrendingUp,
+  Clock,
+  Cpu,
+  AlertCircle,
 } from "lucide-react";
+import InventoryIntelligenceTable from "../components/InventoryIntelligenceTable";
 
 export default function Dashboard({
   items = [],
   sales = [],
+  error = null,
   onNavigateToInventory,
   onNavigateToSales,
 }) {
-  const totalItems = items.length;
-  const lowStockCount = items.filter(
-    (item) => item.currentStock <= item.reorderThreshold,
+  const safeItems = Array.isArray(items) ? items : [];
+  const safeSales = Array.isArray(sales) ? sales : [];
+
+  const totalItems = safeItems.length;
+  const lowStockCount = safeItems.filter(
+    (item) => item && (item.currentStock ?? 0) <= (item.reorderThreshold ?? 0),
   ).length;
-  const healthyCount = items.filter(
-    (item) => item.currentStock > item.reorderThreshold,
+  const healthyCount = safeItems.filter(
+    (item) => item && (item.currentStock ?? 0) > (item.reorderThreshold ?? 0),
   ).length;
-  const totalValuation = items.reduce(
-    (sum, item) => sum + item.currentStock * (item.unitPrice || 0),
+  const totalValuation = safeItems.reduce(
+    (sum, item) => sum + (item?.currentStock || 0) * (item?.unitPrice || 0),
     0,
   );
-  const totalRevenue = sales.reduce((sum, s) => sum + (s.totalAmount || 0), 0);
-  const totalUnitsSold = sales.reduce(
-    (sum, s) => sum + (s.quantitySold || 0),
+  const totalRevenue = safeSales.reduce(
+    (sum, s) => sum + (s?.totalAmount || 0),
+    0,
+  );
+  const totalUnitsSold = safeSales.reduce(
+    (sum, s) => sum + (s?.quantitySold || 0),
     0,
   );
 
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
+      {/* Backend Disconnection Banner */}
+      {error && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-rose-800 text-sm flex items-center justify-between shadow-xs">
+          <div className="flex items-center space-x-3">
+            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+            <div>
+              <p className="font-semibold">Backend Server Disconnected</p>
+              <p className="text-xs text-rose-600 mt-0.5">{error}</p>
+            </div>
+          </div>
+          <span className="text-xs font-mono bg-rose-100 px-2.5 py-1 rounded-md text-rose-700">
+            npm run dev:server
+          </span>
+        </div>
+      )}
+
       {/* Welcome Banner */}
       <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-indigo-800 rounded-2xl p-8 text-white shadow-lg relative overflow-hidden">
         <div className="relative z-10 max-w-2xl">
           <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/30 text-emerald-100 border border-emerald-400/30 mb-4">
-            Phase 2 Active • Sales System & Inventory Integration
+            Phase 3 Active • Sales Velocity & Deterministic Intelligence
           </span>
           <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
             AI Inventory Automation System
           </h1>
           <p className="mt-3 text-indigo-100 text-sm sm:text-base leading-relaxed">
-            Record sales with automatic stock deduction, maintain transaction
-            consistency, and track complete sales history in MongoDB Atlas.
+            Real-time deterministic inventory intelligence: live sales velocity
+            calculations, estimated days until stockout, and automated stockout
+            risk classification without AI.
           </p>
           <div className="mt-6 flex flex-wrap gap-4">
             <button
@@ -63,7 +89,7 @@ export default function Dashboard({
               className="inline-flex items-center px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-sm rounded-xl shadow transition-colors"
             >
               <ShoppingCart className="mr-2 w-4 h-4" />
-              View Sales History
+              Record Sale
             </button>
           </div>
         </div>
@@ -102,7 +128,7 @@ export default function Dashboard({
             ₹{totalRevenue.toLocaleString()}
           </p>
           <span className="text-xs text-slate-500 mt-1 inline-block">
-            {totalUnitsSold} units sold across {sales.length} transactions
+            {totalUnitsSold} units sold across {safeSales.length} transactions
           </span>
         </div>
 
@@ -119,7 +145,7 @@ export default function Dashboard({
             {lowStockCount}
           </p>
           <span className="text-xs text-slate-500 mt-1 inline-block">
-            At or below reorder threshold
+            Below reorder threshold
           </span>
         </div>
 
@@ -141,53 +167,56 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* Architecture & Phase 2 Integration Details */}
+      {/* Phase 3 Inventory Intelligence & Sales Velocity Table */}
+      <InventoryIntelligenceTable onRecordSale={onNavigateToSales} />
+
+      {/* Architecture & Phase 3 Integration Details */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
         <h3 className="text-base font-semibold text-slate-900 mb-4">
-          Phase 2 Architecture & Integration Status
+          Phase 3 Architecture & Intelligence Foundation
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="flex items-start space-x-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
             <div className="p-2 rounded-lg bg-emerald-100 text-emerald-600">
-              <ShoppingCart className="w-5 h-5" />
+              <TrendingUp className="w-5 h-5" />
             </div>
             <div>
               <h4 className="text-sm font-semibold text-slate-900">
-                Atomic Sales Updates
+                Sales Velocity Engine
               </h4>
               <p className="text-xs text-slate-500 mt-0.5">
-                Every sale atomically decrements stock with concurrency
-                protection, preventing negative inventory.
+                Calculates live units sold per day across configurable analysis
+                windows (7d, 14d, 30d).
               </p>
             </div>
           </div>
 
           <div className="flex items-start space-x-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
-            <div className="p-2 rounded-lg bg-indigo-100 text-indigo-600">
-              <Database className="w-5 h-5" />
+            <div className="p-2 rounded-lg bg-amber-100 text-amber-600">
+              <Clock className="w-5 h-5" />
             </div>
             <div>
               <h4 className="text-sm font-semibold text-slate-900">
-                Sales History Store
+                Stockout Forecasting
               </h4>
               <p className="text-xs text-slate-500 mt-0.5">
-                MongoDB Sale model captures timestamp, unit price, quantity, and
-                calculates total amount.
+                Estimates exact days until stockout, proactively flagging
+                products before they run out.
               </p>
             </div>
           </div>
 
           <div className="flex items-start space-x-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
             <div className="p-2 rounded-lg bg-purple-100 text-purple-600">
-              <TrendingUp className="w-5 h-5" />
+              <Cpu className="w-5 h-5" />
             </div>
             <div>
               <h4 className="text-sm font-semibold text-slate-900">
-                Phase 3 Velocity Ready
+                Clean Input for Gemini
               </h4>
               <p className="text-xs text-slate-500 mt-0.5">
-                Sales logs are indexed and ready for velocity calculations and
-                Gemini reorder analysis.
+                Produces structured objective data ready for Gemini AI reasoning
+                and reorder drafts in Phase 4.
               </p>
             </div>
           </div>

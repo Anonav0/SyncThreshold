@@ -7,7 +7,7 @@ import inventoryService from "./services/inventoryService";
 import salesService from "./services/salesService";
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState("inventory");
+  const [activeTab, setActiveTab] = useState("dashboard");
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -78,6 +78,7 @@ export default function App() {
           <Dashboard
             items={items}
             sales={sales}
+            error={error || salesError}
             onNavigateToInventory={() => setActiveTab("inventory")}
             onNavigateToSales={() => setActiveTab("sales")}
           />
@@ -107,7 +108,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4">
           <p>
             SyncThreshold — AI-Powered Inventory Reorder Automation System •
-            Phase 2 Sales Integration
+            Phase 3 Sales Velocity & Deterministic Intelligence
           </p>
         </div>
       </footer>

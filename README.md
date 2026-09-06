@@ -171,6 +171,13 @@ The client will run on `http://localhost:5173`.
 | `GET`  | `/sales/:id`                        | Retrieve single sale record by ID             | `200`, `404`, `400` |
 | `GET`  | `/sales/inventory/:inventoryItemId` | Retrieve sales history for a specific product | `200`, `400`        |
 
+#### Inventory Intelligence & Analysis Endpoints (Phase 3)
+
+| Method | Endpoint                         | Description                                                | Status Codes        |
+| ------ | -------------------------------- | ---------------------------------------------------------- | ------------------- |
+| `GET`  | `/inventory/analysis?days=7`     | Deterministic sales velocity & stockout risk for all items | `200`, `400`        |
+| `GET`  | `/inventory/:id/analysis?days=7` | Velocity & stockout analysis for a single inventory item   | `200`, `404`, `400` |
+
 ### Sample Payloads
 
 #### Record a Sale (`POST /api/sales`):
