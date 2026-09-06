@@ -1,0 +1,26 @@
+{
+  "name": "sync-threshold",
+  "version": "1.0.0",
+  "description": "AI-powered Inventory Reorder Automation System - Phase 1",
+  "private": true,
+  "scripts": {
+    "start:server": "npm --prefix server start",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "build:client": "npm --prefix client run build",
+    "seed": "npm --prefix server run seed",
+    "test:server": "npm --prefix server test",
+    "install:all": "npm --prefix server install && npm --prefix client install"
+  },
+  "keywords": [
+    "inventory",
+    "automation",
+    "reorder",
+    "express",
+    "react",
+    "vite",
+    "mongodb"
+  ],
+  "author": "",
+  "license": "ISC"
+}
