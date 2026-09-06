@@ -11,6 +11,7 @@ dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 process.env.NODE_ENV = "test";
 process.env.PORT = "5003";
+process.env.GEMINI_REQUEST_DELAY_MS = "50";
 
 const { app } = require("../../server");
 const InventoryItem = require("../models/InventoryItem");
@@ -19,6 +20,11 @@ const errorHandler = require("../utils/errorHandler");
 const inventoryAnalysisService = require("../services/inventoryAnalysisService");
 const aiService = require("../services/aiService");
 const { validateAIResponse } = require("../utils/aiResponseValidator");
+const inventoryAutomationService = require("../services/inventoryAutomationService");
+const {
+  startInventoryScheduler,
+  stopInventoryScheduler,
+} = require("../jobs/inventoryMonitor");
 
 test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
   let server;
@@ -276,6 +282,81 @@ test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
         if (originalKey) process.env.GEMINI_API_KEY = originalKey;
         aiService._client = originalClient;
       }
+    },
+  );
+
+  await t.test(
+    "Phase 4 Unit Test 10 — aiService enforces request rate limit delay between consecutive calls",
+    async () => {
+      const originalDelay = process.env.GEMINI_REQUEST_DELAY_MS;
+      process.env.GEMINI_REQUEST_DELAY_MS = "60";
+      aiService._lastRequestTime = Date.now();
+
+      const start = Date.now();
+      await aiService._enforceRequestRateLimit("Test Rate Pacing Item");
+      const duration = Date.now() - start;
+
+      assert.ok(
+        duration >= 40,
+        `Expected delay of at least ~40ms, but took ${duration}ms`,
+      );
+
+      if (originalDelay !== undefined) {
+        process.env.GEMINI_REQUEST_DELAY_MS = originalDelay;
+      }
+    },
+  );
+
+  // Phase 5 Automated Inventory Monitoring Unit Tests
+  await t.test(
+    "Phase 5 Unit Test 1 — Overlapping execution is prevented by in-memory lock",
+    async () => {
+      inventoryAutomationService.isRunning = true;
+      try {
+        await assert.rejects(
+          async () => {
+            await inventoryAutomationService.runInventoryCheck({
+              isScheduled: false,
+            });
+          },
+          (err) => {
+            assert.equal(err.statusCode, 409);
+            assert.match(err.message, /already running/);
+            return true;
+          },
+        );
+      } finally {
+        inventoryAutomationService.isRunning = false;
+      }
+    },
+  );
+
+  await t.test(
+    "Phase 5 Unit Test 2 — AUTOMATION_ENABLED=false prevents cron scheduler registration",
+    () => {
+      const orig = process.env.AUTOMATION_ENABLED;
+      process.env.AUTOMATION_ENABLED = "false";
+      try {
+        const task = startInventoryScheduler();
+        assert.equal(task, null);
+      } finally {
+        if (orig !== undefined) {
+          process.env.AUTOMATION_ENABLED = orig;
+        } else {
+          delete process.env.AUTOMATION_ENABLED;
+        }
+      }
+    },
+  );
+
+  await t.test(
+    "Phase 5 Unit Test 3 — getStatus returns scheduler and execution metadata",
+    () => {
+      const status = inventoryAutomationService.getStatus();
+      assert.ok(typeof status.enabled === "boolean");
+      assert.ok(typeof status.schedule === "string");
+      assert.equal(status.running, false);
+      assert.ok(typeof status.aiEnabled === "boolean");
     },
   );
 
@@ -554,6 +635,61 @@ test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
           );
         } finally {
           await InventoryItem.findByIdAndDelete(lowStockCandidate._id);
+        }
+      },
+    );
+
+    // Phase 5 Integration Test 4: Automation status endpoint
+    await t.test(
+      "GET /api/automation/status returns 200 with configuration & status",
+      async () => {
+        const res = await fetch(`${baseUrl}/api/automation/status`);
+        const body = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(body.success, true);
+        assert.ok(body.data);
+        assert.ok(typeof body.data.enabled === "boolean");
+        assert.ok(typeof body.data.schedule === "string");
+        assert.equal(body.data.running, false);
+      },
+    );
+
+    // Phase 5 Integration Test 5: Manual inventory check trigger returns summary
+    await t.test(
+      "POST /api/automation/inventory-check performs full monitoring run and returns summary",
+      async () => {
+        const res = await fetch(`${baseUrl}/api/automation/inventory-check`, {
+          method: "POST",
+        });
+        const body = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(body.success, true);
+        assert.ok(body.data);
+        assert.ok(["SUCCESS", "PARTIAL_SUCCESS"].includes(body.data.status));
+        assert.ok(body.data.itemsChecked >= 1);
+        assert.ok(typeof body.data.candidatesFound === "number");
+        assert.ok(typeof body.data.aiAnalyses === "number");
+        assert.ok(typeof body.data.geminiSuccesses === "number");
+        assert.ok(typeof body.data.fallbackAnalyses === "number");
+        assert.ok(typeof body.data.errors === "number");
+      },
+    );
+
+    // Phase 5 Integration Test 6: Concurrency conflict returns 409
+    await t.test(
+      "POST /api/automation/inventory-check returns 409 Conflict when a run is active",
+      async () => {
+        inventoryAutomationService.isRunning = true;
+        try {
+          const res = await fetch(`${baseUrl}/api/automation/inventory-check`, {
+            method: "POST",
+          });
+          assert.equal(res.status, 409);
+          const body = await res.json();
+          assert.equal(body.success, false);
+          assert.match(body.message, /already running/);
+        } finally {
+          inventoryAutomationService.isRunning = false;
         }
       },
     );

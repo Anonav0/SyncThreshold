@@ -185,7 +185,36 @@ The client will run on `http://localhost:5173`.
 | `POST` | `/inventory/:id/ai-analysis?days=7` | Compute velocity + run Gemini AI risk analysis & reorder recommendation  | `200`, `400`, `404` |
 | `POST` | `/inventory/ai-analysis?days=7`     | Batch analyze at-risk candidates with Gemini AI (healthy items excluded) | `200`, `400`        |
 
+#### Automated Monitoring Endpoints (Phase 5)
+
+| Method | Endpoint                      | Description                                                                  | Status Codes |
+| ------ | ----------------------------- | ---------------------------------------------------------------------------- | ------------ |
+| `GET`  | `/automation/status`          | Retrieve background cron scheduler configuration, status, and latest summary | `200`        |
+| `POST` | `/automation/inventory-check` | Manually trigger on-demand inventory check workflow (returns 409 if active)  | `200`, `409` |
+
 ### Sample Payloads
+
+#### Automation Run Summary (`POST /api/automation/inventory-check`):
+
+Response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": "SUCCESS",
+    "startedAt": "2026-09-06T13:40:04.933Z",
+    "completedAt": "2026-09-06T13:40:06.179Z",
+    "itemsChecked": 9,
+    "candidatesFound": 4,
+    "aiAnalyses": 4,
+    "geminiSuccesses": 4,
+    "fallbackAnalyses": 0,
+    "errors": 0,
+    "candidates": [ ... ]
+  }
+}
+```
 
 #### Gemini AI Analysis (`POST /api/inventory/:id/ai-analysis?days=7`):
 
@@ -231,10 +260,10 @@ Response:
 
 ---
 
-## Architecture & AI Isolation (Phase 4)
+## Architecture & Automation Workflow (Phase 5)
 
-- **AI Service Isolation**: Google Gemini SDK is strictly encapsulated within `server/src/services/aiService.js`. Routes, models, and controllers have zero awareness of the specific Gemini SDK.
-- **Strict Server-Side Validation**: AI outputs are parsed and validated via `aiResponseValidator.js` against the enum schema (`urgency`: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`; `recommendedAction`: `MONITOR`, `PLAN_REORDER`, `REORDER_SOON`, `REORDER_NOW`).
-- **Deterministic Fallback**: If Gemini encounters network failure, rate limits, or is disabled (`AI_ENABLED=false`), the system gracefully defaults to deterministic thresholds with `source: "fallback"` without crashing Express.
-- **Manual Trigger in UI**: Gemini is only invoked upon explicit user interaction in the UI to minimize token usage and prevent automated runaway calls.
-- **No Early Notification or Cron Logic**: Automated cron jobs and WhatsApp/Twilio alerts remain cleanly partitioned for Phase 5+.
+- **Thin Cron Scheduler**: `server/src/jobs/inventoryMonitor.js` delegates purely to `inventoryAutomationService.js`, which coordinates `inventoryAnalysisService.js` and `aiService.js`.
+- **Concurrency Protection**: An in-memory mutex (`isRunning`) prevents overlapping executions. Concurrent cron triggers skip gracefully; concurrent API calls receive `409 Conflict`.
+- **Fault-Tolerant Product Iteration**: If an individual product encounters an error during audit, it logs the exception, increments error count, and continues with remaining candidates without crashing the process.
+- **Identical Workflow**: Manual execution (`POST /api/automation/inventory-check`) and background cron jobs execute the exact same unified workflow.
+- **No Early Notification Logic**: WhatsApp and Twilio integrations remain cleanly partitioned for Phase 6+.

@@ -108,7 +108,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4">
           <p>
             SyncThreshold — AI-Powered Inventory Reorder Automation System •
-            Phase 4 Gemini AI Risk Analysis
+            Phase 5 Automated Inventory Monitoring
           </p>
         </div>
       </footer>

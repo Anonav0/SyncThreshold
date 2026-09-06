@@ -61,6 +61,35 @@ const RESPONSE_SCHEMA = {
 class AIService {
   constructor() {
     this._client = null;
+    this._lastRequestTime = 0;
+  }
+
+  /**
+   * Enforces pacing delay between outgoing Google Gemini API calls.
+   * Protects against burst rate limit errors (e.g. 429 RESOURCE_EXHAUSTED / 503 UNAVAILABLE).
+   *
+   * @param {string} [productName="item"] - Product name for log context
+   */
+  async _enforceRequestRateLimit(productName = "item") {
+    const rawDelay = process.env.GEMINI_REQUEST_DELAY_MS;
+    const minDelay =
+      rawDelay !== undefined && !isNaN(Number(rawDelay))
+        ? Number(rawDelay)
+        : 1500;
+
+    if (minDelay <= 0) {
+      return;
+    }
+
+    const now = Date.now();
+    const elapsed = now - this._lastRequestTime;
+    if (this._lastRequestTime > 0 && elapsed < minDelay) {
+      const waitMs = minDelay - elapsed;
+      console.log(
+        `[AI] Pacing Gemini request for ${productName}: waiting ${waitMs}ms to respect rate limit...`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
   }
 
   /**
@@ -197,16 +226,52 @@ ${JSON.stringify(
 )}`;
 
     try {
-      const response = await client.models.generateContent({
-        model: modelName,
-        contents: payloadPrompt,
-        config: {
-          systemInstruction: SYSTEM_PROMPT,
-          responseMimeType: "application/json",
-          responseSchema: RESPONSE_SCHEMA,
-          temperature: 0.2, // Low temperature for deterministic, consistent reasoning
-        },
-      });
+      // Enforce rate limit delay before calling Gemini API
+      await this._enforceRequestRateLimit(productName);
+
+      let response = null;
+      let lastErr = null;
+      const maxAttempts = 2;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          response = await client.models.generateContent({
+            model: modelName,
+            contents: payloadPrompt,
+            config: {
+              systemInstruction: SYSTEM_PROMPT,
+              responseMimeType: "application/json",
+              responseSchema: RESPONSE_SCHEMA,
+              temperature: 0.2, // Low temperature for deterministic, consistent reasoning
+            },
+          });
+          this._lastRequestTime = Date.now();
+          break; // Succeeded
+        } catch (callErr) {
+          lastErr = callErr;
+          this._lastRequestTime = Date.now();
+
+          const errMsg = callErr?.message || "";
+          const isRateLimit =
+            errMsg.includes("429") ||
+            errMsg.includes("RESOURCE_EXHAUSTED") ||
+            errMsg.includes("503") ||
+            errMsg.includes("UNAVAILABLE");
+
+          const isDailyQuotaExhausted =
+            errMsg.includes("quota") && errMsg.includes("limit: 20");
+
+          if (isRateLimit && !isDailyQuotaExhausted && attempt < maxAttempts) {
+            const backoffMs = 2000;
+            console.warn(
+              `[AI] Transient rate limit hit for ${productName} (attempt ${attempt}/${maxAttempts}). Backing off for ${backoffMs}ms...`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          } else {
+            throw callErr;
+          }
+        }
+      }
 
       const rawText = response?.text;
       if (!rawText) {
@@ -238,6 +303,7 @@ ${JSON.stringify(
         source: "gemini",
       };
     } catch (err) {
+      this._lastRequestTime = Date.now();
       // Safe error logging (never logs API keys or headers)
       console.error(
         `[AI] Error during Gemini analysis for ${productName}: ${err.message}. Falling back to deterministic rules.`,

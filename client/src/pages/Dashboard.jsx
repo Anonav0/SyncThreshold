@@ -13,6 +13,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import InventoryIntelligenceTable from "../components/InventoryIntelligenceTable";
+import AutomationStatusCard from "../components/AutomationStatusCard";
 
 export default function Dashboard({
   items = [],
@@ -65,28 +66,28 @@ export default function Dashboard({
       {/* Welcome Banner */}
       <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-indigo-800 rounded-2xl p-8 text-white shadow-lg relative overflow-hidden">
         <div className="relative z-10 max-w-2xl">
-          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/30 text-emerald-100 border border-emerald-400/30 mb-4">
-            Phase 3 Active • Sales Velocity & Deterministic Intelligence
+          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-500/30 text-purple-100 border border-purple-400/30 mb-4">
+            Phase 5 Active • Automated Background Monitoring & Gemini AI
           </span>
           <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
             AI Inventory Automation System
           </h1>
           <p className="mt-3 text-indigo-100 text-sm sm:text-base leading-relaxed">
-            Real-time deterministic inventory intelligence: live sales velocity
-            calculations, estimated days until stockout, and automated stockout
-            risk classification without AI.
+            Autonomous background inventory auditing with node-cron, real-time
+            deterministic sales velocity projections, and contextual Google
+            Gemini AI reorder recommendations.
           </p>
           <div className="mt-6 flex flex-wrap gap-4">
             <button
               onClick={onNavigateToInventory}
-              className="inline-flex items-center px-4 py-2.5 bg-white text-indigo-700 font-semibold text-sm rounded-xl shadow hover:bg-indigo-50 transition-colors"
+              className="inline-flex items-center px-4 py-2.5 bg-white text-indigo-700 font-semibold text-sm rounded-xl shadow hover:bg-indigo-50 transition-colors cursor-pointer"
             >
               Manage Inventory
               <ArrowRight className="ml-2 w-4 h-4" />
             </button>
             <button
               onClick={onNavigateToSales}
-              className="inline-flex items-center px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-sm rounded-xl shadow transition-colors"
+              className="inline-flex items-center px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-sm rounded-xl shadow transition-colors cursor-pointer"
             >
               <ShoppingCart className="mr-2 w-4 h-4" />
               Record Sale
@@ -97,6 +98,9 @@ export default function Dashboard({
           <Package className="w-80 h-80" />
         </div>
       </div>
+
+      {/* Phase 5 Automated Background Monitoring Status Card */}
+      <AutomationStatusCard />
 
       {/* Overview Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">

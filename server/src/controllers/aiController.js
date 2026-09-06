@@ -105,9 +105,19 @@ const analyzeCandidatesRisk = asyncHandler(async (req, res) => {
     `[AI Batch] Selected ${candidates.length} candidates out of ${allAnalysis.length} total items for AI analysis (healthy items excluded).`,
   );
 
-  // 3. Analyze each candidate sequentially through aiService
+  // 3. Analyze each candidate sequentially through aiService with pacing
+  const delayMs =
+    process.env.GEMINI_REQUEST_DELAY_MS !== undefined &&
+    !isNaN(Number(process.env.GEMINI_REQUEST_DELAY_MS))
+      ? Number(process.env.GEMINI_REQUEST_DELAY_MS)
+      : 1500;
+
   const results = [];
-  for (const candidate of candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    if (i > 0 && delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
     const aiResult = await aiService.analyzeInventoryRisk(candidate);
     results.push({
       inventory: {

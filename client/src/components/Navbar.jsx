@@ -39,7 +39,7 @@ export default function Navbar({ activeTab, setActiveTab }) {
                 SyncThreshold
               </span>
               <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
-                Phase 4 • Gemini AI Analysis
+                Phase 5 • Automated Monitoring
               </span>
             </div>
           </div>

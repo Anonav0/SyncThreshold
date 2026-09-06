@@ -11,7 +11,9 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 const connectDB = require("./src/config/database");
 const inventoryRoutes = require("./src/routes/inventoryRoutes");
 const salesRoutes = require("./src/routes/salesRoutes");
+const automationRoutes = require("./src/routes/automationRoutes");
 const errorHandler = require("./src/utils/errorHandler");
+const { startInventoryScheduler } = require("./src/jobs/inventoryMonitor");
 
 const app = express();
 
@@ -30,6 +32,7 @@ app.get("/api/health", (req, res) => {
 // API Routes
 app.use("/api/inventory", inventoryRoutes);
 app.use("/api/sales", salesRoutes);
+app.use("/api/automation", automationRoutes);
 
 // Catch-all 404 handler for undefined routes
 app.use("*", (req, res) => {
@@ -47,6 +50,12 @@ const PORT = process.env.PORT || 5000;
 const startServer = async () => {
   try {
     await connectDB();
+
+    // Start background inventory monitoring cron scheduler
+    if (process.env.AUTOMATION_ENABLED !== "false") {
+      startInventoryScheduler();
+    }
+
     const server = app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });
