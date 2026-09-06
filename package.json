@@ -1,7 +1,7 @@
 {
   "name": "sync-threshold",
   "version": "1.0.0",
-  "description": "AI-powered Inventory Reorder Automation System - Phase 1",
+  "description": "Autonomous AI-Powered Inventory Intelligence, Risk Forecasting & Reorder Automation Platform",
   "private": true,
   "scripts": {
     "start:server": "npm --prefix server start",
