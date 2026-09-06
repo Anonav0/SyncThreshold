@@ -74,6 +74,14 @@ const alertSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    emailSent: {
+      type: Boolean,
+      default: false,
+    },
+    emailSentAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

@@ -108,7 +108,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4">
           <p>
             SyncThreshold — AI-Powered Inventory Reorder Automation System •
-            Phase 6 Alert Persistence & Duplicate Prevention
+            Phase 7 Email Notifications & Alert Persistence
           </p>
         </div>
       </footer>

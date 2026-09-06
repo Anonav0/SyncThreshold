@@ -15,6 +15,7 @@ import {
 import InventoryIntelligenceTable from "../components/InventoryIntelligenceTable";
 import AutomationStatusCard from "../components/AutomationStatusCard";
 import AlertsSection from "../components/AlertsSection";
+import NotificationSettingsCard from "../components/NotificationSettingsCard";
 
 export default function Dashboard({
   items = [],
@@ -69,7 +70,7 @@ export default function Dashboard({
       <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-indigo-800 rounded-2xl p-8 text-white shadow-lg relative overflow-hidden">
         <div className="relative z-10 max-w-2xl">
           <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-500/30 text-purple-100 border border-purple-400/30 mb-4">
-            Phase 6 Active • Alert Persistence & Duplicate Prevention
+            Phase 7 Active • Email Notifications & Alert Persistence
           </span>
           <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
             AI Inventory Automation System
@@ -77,8 +78,8 @@ export default function Dashboard({
           <p className="mt-3 text-indigo-100 text-sm sm:text-base leading-relaxed">
             Autonomous background inventory auditing with node-cron, real-time
             deterministic sales velocity projections, contextual Google Gemini
-            AI reorder recommendations, and persistent MongoDB alerts with
-            duplicate prevention.
+            AI reorder recommendations, persistent MongoDB alerts, and automated
+            SMTP email notifications.
           </p>
           <div className="mt-6 flex flex-wrap gap-4">
             <button
@@ -105,6 +106,11 @@ export default function Dashboard({
       {/* Phase 5 Automated Background Monitoring Status Card */}
       <AutomationStatusCard
         onRunComplete={() => setAlertRefreshKey((k) => k + 1)}
+      />
+
+      {/* Phase 7 Email Notifications Control Card */}
+      <NotificationSettingsCard
+        onPendingDispatched={() => setAlertRefreshKey((k) => k + 1)}
       />
 
       {/* Phase 6 Persistent Inventory Alerts Section */}

@@ -201,6 +201,15 @@ The client will run on `http://localhost:5173`.
 | `GET`  | `/alerts/:id`                        | Retrieve single alert record by ID                                          | `200`, `404` |
 | `GET`  | `/alerts/inventory/:inventoryItemId` | Retrieve all alerts (active & resolved) for a specific inventory item       | `200`        |
 
+#### Email Notification Endpoints (Phase 7)
+
+| Method | Endpoint                          | Description                                                                     | Status Codes        |
+| ------ | --------------------------------- | ------------------------------------------------------------------------------- | ------------------- |
+| `GET`  | `/notifications/status`           | Retrieve notification provider configuration status (never exposes credentials) | `200`               |
+| `POST` | `/notifications/test`             | Trigger a manual test email dispatch to `ALERT_EMAIL_TO`                        | `200`, `400`, `500` |
+| `POST` | `/notifications/alerts/:id`       | Trigger an email notification for a specific active alert                       | `200`, `404`, `500` |
+| `POST` | `/notifications/dispatch-pending` | Batch dispatch email notifications for all un-notified active alerts            | `200`, `500`        |
+
 ### Sample Payloads
 
 #### Automation Run Summary (`POST /api/automation/inventory-check`):
@@ -219,9 +228,11 @@ Response:
     "aiAnalyses": 4,
     "geminiSuccesses": 4,
     "fallbackAnalyses": 0,
-    "alertsCreated": 0,
-    "alertsReused": 4,
+    "alertsCreated": 1,
+    "alertsReused": 3,
     "alertsResolved": 0,
+    "notificationsSent": 1,
+    "notificationFailures": 0,
     "errors": 0,
     "candidates": [ ... ]
   }

@@ -304,6 +304,20 @@ export default function AutomationStatusCard({ onRunComplete }) {
               </div>
             </div>
             <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+              <div className="text-slate-500 text-2xs">Emails Sent</div>
+              <div className="text-base font-bold text-indigo-600 mt-0.5">
+                {summary.notificationsSent ?? 0}
+              </div>
+            </div>
+            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+              <div className="text-slate-500 text-2xs">Email Failures</div>
+              <div
+                className={`text-base font-bold mt-0.5 ${(summary.notificationFailures ?? 0) > 0 ? "text-amber-600" : "text-slate-700"}`}
+              >
+                {summary.notificationFailures ?? 0}
+              </div>
+            </div>
+            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
               <div className="text-slate-500 text-2xs">Errors</div>
               <div
                 className={`text-base font-bold mt-0.5 ${summary.errors > 0 ? "text-rose-600" : "text-emerald-600"}`}

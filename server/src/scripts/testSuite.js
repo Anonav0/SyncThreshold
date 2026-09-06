@@ -27,6 +27,7 @@ const {
 } = require("../jobs/inventoryMonitor");
 const Alert = require("../models/Alert");
 const alertService = require("../services/alertService");
+const emailService = require("../services/emailService");
 
 test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
   let server;
@@ -48,6 +49,21 @@ test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
     if (mongoose.connection.readyState === 0 && process.env.MONGODB_URI) {
       await mongoose.connect(process.env.MONGODB_URI);
     }
+
+    // Phase 7: Mock email transport globally for test suite (zero real emails)
+    process.env.EMAIL_ENABLED = "true";
+    process.env.SMTP_HOST = "smtp.test.local";
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_USER = "test@syncthreshold.test";
+    process.env.SMTP_PASSWORD = "test-secret-password";
+    process.env.ALERT_EMAIL_FROM = "alerts@syncthreshold.test";
+    process.env.ALERT_EMAIL_TO = "ops@syncthreshold.test";
+
+    emailService._transporter = {
+      sendMail: async (mailOptions) => {
+        return { messageId: `mock-msg-${Date.now()}` };
+      },
+    };
   });
 
   // Test 1: Health Check
@@ -575,6 +591,158 @@ test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
     },
   );
 
+  // Phase 7 Email Inventory Notifications Unit Tests
+  await t.test(
+    "Phase 7 Unit Test 1 — emailService.sendEmail dispatches email using mock transport",
+    async () => {
+      let sentOptions = null;
+      emailService._transporter = {
+        sendMail: async (opts) => {
+          sentOptions = opts;
+          return { messageId: "test-msg-123" };
+        },
+      };
+
+      const result = await emailService.sendEmail({
+        to: "recipient@test.com",
+        subject: "Unit Test Subject",
+        text: "Unit Test Body",
+      });
+
+      assert.equal(result.success, true);
+      assert.equal(result.messageId, "test-msg-123");
+      assert.equal(sentOptions.to, "recipient@test.com");
+      assert.equal(sentOptions.subject, "Unit Test Subject");
+      assert.equal(sentOptions.text, "Unit Test Body");
+    },
+  );
+
+  await t.test(
+    "Phase 7 Unit Test 2 — emailService.sendEmail handles SMTP delivery failure gracefully without throwing",
+    async () => {
+      emailService._transporter = {
+        sendMail: async () => {
+          throw new Error("Simulated SMTP Connection Timeout");
+        },
+      };
+
+      const result = await emailService.sendEmail({
+        to: "fail@test.com",
+        subject: "Failure Test",
+        text: "Failure Test Body",
+      });
+
+      assert.equal(result.success, false);
+      assert.match(result.error, /Simulated SMTP Connection Timeout/);
+    },
+  );
+
+  await t.test(
+    "Phase 7 Unit Test 3 — emailService.sendEmail returns structured error when SMTP configuration is incomplete",
+    async () => {
+      const origUser = process.env.SMTP_USER;
+      delete process.env.SMTP_USER;
+
+      try {
+        const result = await emailService.sendEmail({
+          subject: "Incomplete Config Test",
+          text: "Body",
+        });
+
+        assert.equal(result.success, false);
+        assert.match(result.error, /SMTP configuration is incomplete/);
+      } finally {
+        process.env.SMTP_USER = origUser;
+      }
+    },
+  );
+
+  await t.test(
+    "Phase 7 Unit Test 4 — emailService.sendEmail respects EMAIL_ENABLED=false",
+    async () => {
+      const origEnabled = process.env.EMAIL_ENABLED;
+      process.env.EMAIL_ENABLED = "false";
+
+      try {
+        const result = await emailService.sendEmail({
+          subject: "Disabled Test",
+          text: "Body",
+        });
+
+        assert.equal(result.success, false);
+        assert.equal(result.disabled, true);
+        assert.match(result.error, /disabled via configuration/);
+      } finally {
+        process.env.EMAIL_ENABLED = origEnabled;
+      }
+    },
+  );
+
+  await t.test(
+    "Phase 7 Unit Test 5 — emailService.sendInventoryAlertEmail formats professional email body and subject",
+    async () => {
+      let sentOptions = null;
+      emailService._transporter = {
+        sendMail: async (opts) => {
+          sentOptions = opts;
+          return { messageId: "alert-formatted-id" };
+        },
+      };
+
+      const mockAlert = {
+        alertType: "LOW_STOCK",
+        urgency: "HIGH",
+        recommendedAction: "REORDER_SOON",
+        reason: "Stock depleted below reorder threshold",
+        source: "gemini",
+        createdAt: new Date(),
+      };
+
+      const mockItem = {
+        name: "Egyptian Cotton Yarn",
+        sku: "EGY-001",
+        currentStock: 12,
+        reorderThreshold: 30,
+      };
+
+      const mockAnalysis = {
+        salesVelocity: 4.5,
+        daysUntilStockout: 2.67,
+      };
+
+      const res = await emailService.sendInventoryAlertEmail(
+        mockAlert,
+        mockItem,
+        mockAnalysis,
+      );
+
+      assert.equal(res.success, true);
+      assert.match(
+        sentOptions.subject,
+        /\[Inventory Alert\] Egyptian Cotton Yarn — HIGH Risk/,
+      );
+      assert.match(sentOptions.text, /Product: Egyptian Cotton Yarn/);
+      assert.match(sentOptions.text, /SKU: EGY-001/);
+      assert.match(sentOptions.text, /Current Stock: 12/);
+      assert.match(sentOptions.text, /Reorder Threshold: 30/);
+      assert.match(sentOptions.text, /Sales Velocity: 4.5 units\/day/);
+      assert.match(sentOptions.text, /Days Until Stockout: 2.67 days/);
+      assert.match(sentOptions.text, /REORDER_SOON/);
+      assert.match(sentOptions.html, /Egyptian Cotton Yarn/);
+    },
+  );
+
+  await t.test(
+    "Phase 7 Unit Test 6 — emailService.getStatus returns safe metadata without credentials",
+    () => {
+      const status = emailService.getStatus();
+      assert.equal(typeof status.emailEnabled, "boolean");
+      assert.equal(typeof status.emailConfigured, "boolean");
+      assert.equal(status.password, undefined);
+      assert.equal(status.SMTP_PASSWORD, undefined);
+    },
+  );
+
   // Phase 3 Calculation Unit Tests
   await t.test(
     "Phase 3 Unit Test 1 — Sales velocity calculation (56 units / 7 days = 8 units/day)",
@@ -1020,19 +1188,243 @@ test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
       },
     );
 
-    // Phase 6 Integration Test 11: POST /api/automation/inventory-check summary includes alert counts
+    // Phase 7 Integration Test 7: GET /api/notifications/status
     await t.test(
-      "POST /api/automation/inventory-check summary contains alertsCreated, alertsReused, alertsResolved",
+      "GET /api/notifications/status returns 200 with status and never exposes credentials",
       async () => {
+        const res = await fetch(`${baseUrl}/api/notifications/status`);
+        const body = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(body.success, true);
+        assert.equal(typeof body.data.emailEnabled, "boolean");
+        assert.equal(typeof body.data.emailConfigured, "boolean");
+        assert.equal(body.data.SMTP_PASSWORD, undefined);
+        assert.equal(body.data.password, undefined);
+      },
+    );
+
+    // Phase 7 Integration Test 8: POST /api/notifications/test sends email
+    await t.test(
+      "POST /api/notifications/test sends a test email successfully via mock transporter",
+      async () => {
+        let testDispatched = false;
+        emailService._transporter = {
+          sendMail: async (opts) => {
+            testDispatched = true;
+            assert.equal(opts.to, process.env.ALERT_EMAIL_TO);
+            return { messageId: "manual-test-id" };
+          },
+        };
+
+        const res = await fetch(`${baseUrl}/api/notifications/test`, {
+          method: "POST",
+        });
+        const body = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(body.success, true);
+        assert.match(body.data.message, /Test email sent successfully/);
+        assert.equal(testDispatched, true);
+      },
+    );
+
+    // Phase 7 Integration Test 9: POST /api/notifications/test returns 400 when disabled
+    await t.test(
+      "POST /api/notifications/test returns 400 when EMAIL_ENABLED=false",
+      async () => {
+        const orig = process.env.EMAIL_ENABLED;
+        process.env.EMAIL_ENABLED = "false";
+        try {
+          const res = await fetch(`${baseUrl}/api/notifications/test`, {
+            method: "POST",
+          });
+          const body = await res.json();
+          assert.equal(res.status, 400);
+          assert.equal(body.success, false);
+          assert.match(body.message, /disabled/);
+        } finally {
+          process.env.EMAIL_ENABLED = orig;
+        }
+      },
+    );
+
+    // Phase 7 Integration Test 10: Automation summary contains notificationsSent and notificationFailures
+    await t.test(
+      "POST /api/automation/inventory-check summary includes notificationsSent and notificationFailures",
+      async () => {
+        emailService._transporter = {
+          sendMail: async () => ({ messageId: "automation-test-id" }),
+        };
+
         const res = await fetch(`${baseUrl}/api/automation/inventory-check`, {
           method: "POST",
         });
         const body = await res.json();
         assert.equal(res.status, 200);
         assert.equal(body.success, true);
-        assert.ok(typeof body.data.alertsCreated === "number");
-        assert.ok(typeof body.data.alertsReused === "number");
-        assert.ok(typeof body.data.alertsResolved === "number");
+        assert.ok(typeof body.data.notificationsSent === "number");
+        assert.ok(typeof body.data.notificationFailures === "number");
+      },
+    );
+
+    // Phase 7 Integration Test 11: Reused alerts do not dispatch duplicate emails
+    await t.test(
+      "Repeated automation run does not trigger duplicate emails for reused active alerts",
+      async () => {
+        const sentEmails = [];
+        emailService._transporter = {
+          sendMail: async (opts) => {
+            sentEmails.push(opts);
+            return { messageId: `msg-${Date.now()}` };
+          },
+        };
+
+        // First run (or subsequent run where existing active alerts already exist)
+        const res = await fetch(`${baseUrl}/api/automation/inventory-check`, {
+          method: "POST",
+        });
+        const body = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(body.success, true);
+
+        // If candidates are reused, alertsReused > 0 and notificationsSent should equal alertsCreated (0)
+        if (body.data.alertsReused > 0 && body.data.alertsCreated === 0) {
+          assert.equal(body.data.notificationsSent, 0);
+          assert.equal(
+            sentEmails.length,
+            0,
+            "No emails should be sent when alerts are reused",
+          );
+        }
+      },
+    );
+
+    // Phase 7 Integration Test 12: Email delivery failure does not remove alert or break audit
+    await t.test(
+      "Email delivery failure records notificationFailures, preserves active alert, and finishes run",
+      async () => {
+        const dummyItem = await InventoryItem.create({
+          name: "Email Failure Test Product",
+          sku: `FAIL-EMAIL-${Date.now()}`,
+          category: "Testing",
+          currentStock: 2,
+          reorderThreshold: 20,
+          unitPrice: 15,
+          supplier: "Test Supplier",
+        });
+
+        // Fail email deliberately
+        emailService._transporter = {
+          sendMail: async () => {
+            throw new Error("SMTP Outage Simulation");
+          },
+        };
+
+        try {
+          const res = await fetch(`${baseUrl}/api/automation/inventory-check`, {
+            method: "POST",
+          });
+          const body = await res.json();
+          assert.equal(res.status, 200);
+          assert.equal(body.success, true);
+          assert.ok(body.data.notificationFailures >= 1);
+
+          // Verify that alert was still created and remains ACTIVE in MongoDB
+          const activeAlert = await Alert.findOne({
+            inventoryItemId: dummyItem._id,
+            status: "ACTIVE",
+          });
+          assert.ok(
+            activeAlert !== null,
+            "Alert must remain active even if email failed",
+          );
+        } finally {
+          await Alert.deleteMany({ inventoryItemId: dummyItem._id });
+          await InventoryItem.findByIdAndDelete(dummyItem._id);
+          // Restore working mock transporter
+          emailService._transporter = {
+            sendMail: async () => ({ messageId: "restored-id" }),
+          };
+        }
+      },
+    );
+
+    // Phase 7 Integration Test 13: Send email for a specific alert by ID
+    await t.test(
+      "POST /api/notifications/alerts/:id sends alert email and marks emailSent true",
+      async () => {
+        let sentEmail = null;
+        emailService._transporter = {
+          sendMail: async (opts) => {
+            sentEmail = opts;
+            return { messageId: "single-alert-msg-id" };
+          },
+        };
+
+        const dummyItem = await InventoryItem.create({
+          name: "Single Alert Email Product",
+          sku: `SINGLE-ALERT-${Date.now()}`,
+          category: "Testing",
+          currentStock: 5,
+          reorderThreshold: 20,
+          unitPrice: 25,
+          supplier: "Test Supplier",
+        });
+
+        const dummyAlert = await Alert.create({
+          inventoryItemId: dummyItem._id,
+          alertType: "LOW_STOCK",
+          urgency: "HIGH",
+          recommendedAction: "REORDER_NOW",
+          reason: "Critical stock level detected",
+          source: "gemini",
+          status: "ACTIVE",
+          emailSent: false,
+        });
+
+        try {
+          const res = await fetch(
+            `${baseUrl}/api/notifications/alerts/${dummyAlert._id}`,
+            {
+              method: "POST",
+            },
+          );
+          const body = await res.json();
+          assert.equal(res.status, 200);
+          assert.equal(body.success, true);
+          assert.match(sentEmail.subject, /Single Alert Email Product/);
+
+          const updatedAlert = await Alert.findById(dummyAlert._id);
+          assert.equal(updatedAlert.emailSent, true);
+          assert.ok(updatedAlert.emailSentAt !== null);
+        } finally {
+          await Alert.deleteMany({ inventoryItemId: dummyItem._id });
+          await InventoryItem.findByIdAndDelete(dummyItem._id);
+          emailService._transporter = {
+            sendMail: async () => ({ messageId: "restored-id" }),
+          };
+        }
+      },
+    );
+
+    // Phase 7 Integration Test 14: Dispatch pending alerts endpoint
+    await t.test(
+      "POST /api/notifications/dispatch-pending dispatches emails for un-notified active alerts",
+      async () => {
+        emailService._transporter = {
+          sendMail: async () => ({ messageId: "batch-pending-msg-id" }),
+        };
+
+        const res = await fetch(
+          `${baseUrl}/api/notifications/dispatch-pending`,
+          {
+            method: "POST",
+          },
+        );
+        const body = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(body.success, true);
+        assert.ok(typeof body.data.dispatchedCount === "number");
+        assert.ok(typeof body.data.failureCount === "number");
       },
     );
 

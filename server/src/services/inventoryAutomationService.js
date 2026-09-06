@@ -17,6 +17,8 @@
 const inventoryAnalysisService = require("./inventoryAnalysisService");
 const aiService = require("./aiService");
 const alertService = require("./alertService");
+const emailService = require("./emailService");
+const Alert = require("../models/Alert");
 
 class InventoryAutomationService {
   constructor() {
@@ -83,6 +85,8 @@ class InventoryAutomationService {
     let alertsCreated = 0;
     let alertsReused = 0;
     let alertsResolved = 0;
+    let notificationsSent = 0;
+    let notificationFailures = 0;
     let errors = 0;
     const candidateResults = [];
 
@@ -147,7 +151,7 @@ class InventoryAutomationService {
 
           aiAnalyses++;
 
-          // Phase 6: Alert Persistence & Duplicate-Alert Prevention
+          // Phase 6 & 7: Alert Persistence, Duplicate Prevention & Email Notification
           try {
             const alertOutcome = await alertService.createAlertIfNeeded({
               inventoryItemId: candidate.inventoryItemId,
@@ -162,6 +166,41 @@ class InventoryAutomationService {
               alertsCreated++;
             } else if (alertOutcome.reused) {
               alertsReused++;
+            }
+
+            // Phase 7: Dispatch email if alert was newly created, or if active alert was reused but has not yet had an email dispatched
+            const shouldSendEmail =
+              alertOutcome.created ||
+              (alertOutcome.reused && !alertOutcome.alert?.emailSent);
+
+            if (shouldSendEmail) {
+              try {
+                const emailResult = await emailService.sendInventoryAlertEmail(
+                  alertOutcome.alert,
+                  candidate,
+                  candidate,
+                );
+                if (emailResult.success) {
+                  notificationsSent++;
+                  if (alertOutcome.alert?._id) {
+                    await Alert.findByIdAndUpdate(alertOutcome.alert._id, {
+                      emailSent: true,
+                      emailSentAt: new Date(),
+                    });
+                    if (alertOutcome.alert.emailSent !== undefined) {
+                      alertOutcome.alert.emailSent = true;
+                      alertOutcome.alert.emailSentAt = new Date();
+                    }
+                  }
+                } else if (!emailResult.disabled) {
+                  notificationFailures++;
+                }
+              } catch (emailErr) {
+                notificationFailures++;
+                console.error(
+                  `[Inventory Monitor] Failed to dispatch email for ${sku}: ${emailErr.message}`,
+                );
+              }
             }
           } catch (alertErr) {
             console.error(
@@ -227,6 +266,8 @@ class InventoryAutomationService {
         alertsCreated,
         alertsReused,
         alertsResolved,
+        notificationsSent,
+        notificationFailures,
         errors,
         candidates: candidateResults,
       };
@@ -239,7 +280,7 @@ class InventoryAutomationService {
       console.log(
         `[Inventory Monitor] Automation completed with status ${overallStatus} in ${
           new Date(completedAt).getTime() - new Date(startedAt).getTime()
-        }ms. (Checked: ${itemsChecked}, Candidates: ${candidatesFound}, Gemini: ${geminiSuccesses}, Fallback: ${fallbackAnalyses}, AlertsCreated: ${alertsCreated}, AlertsReused: ${alertsReused}, AlertsResolved: ${alertsResolved}, Errors: ${errors})`,
+        }ms. (Checked: ${itemsChecked}, Candidates: ${candidatesFound}, Gemini: ${geminiSuccesses}, Fallback: ${fallbackAnalyses}, AlertsCreated: ${alertsCreated}, AlertsReused: ${alertsReused}, AlertsResolved: ${alertsResolved}, NotificationsSent: ${notificationsSent}, NotificationFailures: ${notificationFailures}, Errors: ${errors})`,
       );
 
       return summary;
@@ -259,6 +300,8 @@ class InventoryAutomationService {
         alertsCreated,
         alertsReused,
         alertsResolved,
+        notificationsSent,
+        notificationFailures,
         errors: errors + 1,
         errorMessage: criticalErr.message,
       };

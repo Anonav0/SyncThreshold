@@ -10,14 +10,54 @@ import {
   Archive,
   ArrowRightCircle,
   Cpu,
+  Mail,
+  Send,
 } from "lucide-react";
 import alertService from "../services/alertService";
+import notificationService from "../services/notificationService";
 
 export default function AlertsSection() {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [statusFilter, setStatusFilter] = useState("ACTIVE"); // 'ALL', 'ACTIVE', 'RESOLVED'
+  const [emailLoadingId, setEmailLoadingId] = useState(null);
+  const [emailFeedback, setEmailFeedback] = useState(null);
+
+  const handleSendAlertEmail = async (alertId) => {
+    setEmailLoadingId(alertId);
+    setEmailFeedback(null);
+    try {
+      const res = await notificationService.sendAlertNotification(alertId);
+      setEmailFeedback({
+        alertId,
+        type: "success",
+        message: res.message || "Alert email dispatched successfully!",
+      });
+      setAlerts((prev) =>
+        prev.map((a) =>
+          a._id === alertId
+            ? {
+                ...a,
+                emailSent: true,
+                emailSentAt: new Date().toISOString(),
+              }
+            : a,
+        ),
+      );
+    } catch (err) {
+      setEmailFeedback({
+        alertId,
+        type: "error",
+        message:
+          err.response?.data?.message ||
+          err.message ||
+          "Failed to dispatch alert email.",
+      });
+    } finally {
+      setEmailLoadingId(null);
+    }
+  };
 
   const fetchAlerts = useCallback(async () => {
     setLoading(true);
@@ -318,6 +358,69 @@ export default function AlertsSection() {
                           </span>
                         )}
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Phase 7 Email Status & Dispatch Controls */}
+                  <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center space-x-2">
+                      {alert.emailSent ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <Mail className="w-3 h-3 mr-1 text-emerald-600" />
+                          Email Dispatched
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                          <Mail className="w-3 h-3 mr-1 text-amber-600" />
+                          Pending Email Dispatch
+                        </span>
+                      )}
+
+                      {alert.emailSentAt && (
+                        <span className="text-[11px] text-slate-400">
+                          • Dispatched at{" "}
+                          {new Date(alert.emailSentAt).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      {emailFeedback?.alertId === alert._id && (
+                        <span
+                          className={`text-xs font-medium px-2 py-0.5 rounded ${
+                            emailFeedback.type === "success"
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              : "bg-rose-50 text-rose-700 border border-rose-200"
+                          }`}
+                        >
+                          {emailFeedback.message}
+                        </span>
+                      )}
+
+                      {!isResolved && (
+                        <button
+                          onClick={() => handleSendAlertEmail(alert._id)}
+                          disabled={emailLoadingId === alert._id}
+                          className="inline-flex items-center px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-lg transition-colors border border-indigo-200 disabled:opacity-50 cursor-pointer"
+                        >
+                          {emailLoadingId === alert._id ? (
+                            <>
+                              <RefreshCw className="w-3 h-3 animate-spin mr-1.5" />
+                              Sending Email...
+                            </>
+                          ) : (
+                            <>
+                              <Send className="w-3 h-3 mr-1.5" />
+                              {alert.emailSent
+                                ? "Resend Alert Email"
+                                : "Send Alert Email"}
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
