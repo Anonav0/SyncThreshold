@@ -178,7 +178,47 @@ The client will run on `http://localhost:5173`.
 | `GET`  | `/inventory/analysis?days=7`     | Deterministic sales velocity & stockout risk for all items | `200`, `400`        |
 | `GET`  | `/inventory/:id/analysis?days=7` | Velocity & stockout analysis for a single inventory item   | `200`, `404`, `400` |
 
+#### Gemini AI Risk Analysis Endpoints (Phase 4)
+
+| Method | Endpoint                            | Description                                                              | Status Codes        |
+| ------ | ----------------------------------- | ------------------------------------------------------------------------ | ------------------- |
+| `POST` | `/inventory/:id/ai-analysis?days=7` | Compute velocity + run Gemini AI risk analysis & reorder recommendation  | `200`, `400`, `404` |
+| `POST` | `/inventory/ai-analysis?days=7`     | Batch analyze at-risk candidates with Gemini AI (healthy items excluded) | `200`, `400`        |
+
 ### Sample Payloads
+
+#### Gemini AI Analysis (`POST /api/inventory/:id/ai-analysis?days=7`):
+
+Response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "inventory": {
+      "id": "67cc244d4715b74c87123456",
+      "name": "Cotton Yarn Spools",
+      "sku": "YARN-001",
+      "category": "Raw Material"
+    },
+    "deterministicAnalysis": {
+      "currentStock": 35,
+      "reorderThreshold": 50,
+      "totalUnitsSold": 56,
+      "analysisDays": 7,
+      "salesVelocity": 8,
+      "daysUntilStockout": 4.38,
+      "status": "LOW_STOCK"
+    },
+    "aiAnalysis": {
+      "urgency": "CRITICAL",
+      "recommendedAction": "REORDER_NOW",
+      "reason": "Current stock of 35 is below the reorder threshold of 50, with stockout projected in 4.38 days at a sales velocity of 8 units per day.",
+      "source": "gemini"
+    }
+  }
+}
+```
 
 #### Record a Sale (`POST /api/sales`):
 
@@ -189,49 +229,12 @@ The client will run on `http://localhost:5173`.
 }
 ```
 
-Response:
-
-```json
-{
-  "success": true,
-  "data": {
-    "sale": {
-      "_id": "...",
-      "inventoryItemId": { "name": "Cotton Yarn Spools", "sku": "YARN-001" },
-      "quantitySold": 5,
-      "unitPrice": 120,
-      "totalAmount": 600,
-      "soldAt": "2026-09-06T11:00:00.000Z"
-    },
-    "inventory": {
-      "_id": "...",
-      "name": "Cotton Yarn Spools",
-      "currentStock": 245
-    }
-  }
-}
-```
-
-#### Create Item (`POST /api/inventory`):
-
-```json
-{
-  "name": "Cotton Yarn Spools",
-  "sku": "YARN-001",
-  "category": "Raw Material",
-  "currentStock": 250,
-  "reorderThreshold": 50,
-  "unitPrice": 120,
-  "averageDailySales": 10,
-  "supplier": "ABC Textiles"
-}
-```
-
 ---
 
-## Architecture & Phase 3 Velocity Readiness
+## Architecture & AI Isolation (Phase 4)
 
-- **Inventory-Sales Consistency**: Product sales atomically deduct stock with MongoDB concurrency protection (`$inc` condition `{ currentStock: { $gte: quantitySold } }`). Stock can never become negative.
-- **Sales History Logging**: Every sale captures snapshot unit price, quantity, calculated total amount, and timestamp.
-- **Phase 3 Readiness**: The `GET /api/sales/inventory/:inventoryItemId` endpoint provides historical sale velocity data, ready for consumption by Phase 3 automated reorder algorithms and Google Gemini risk analysis.
-- **No Early AI / Cron Logic**: Automated cron jobs, Twilio WhatsApp notifications, and AI risk scoring remain cleanly partitioned for subsequent phases.
+- **AI Service Isolation**: Google Gemini SDK is strictly encapsulated within `server/src/services/aiService.js`. Routes, models, and controllers have zero awareness of the specific Gemini SDK.
+- **Strict Server-Side Validation**: AI outputs are parsed and validated via `aiResponseValidator.js` against the enum schema (`urgency`: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`; `recommendedAction`: `MONITOR`, `PLAN_REORDER`, `REORDER_SOON`, `REORDER_NOW`).
+- **Deterministic Fallback**: If Gemini encounters network failure, rate limits, or is disabled (`AI_ENABLED=false`), the system gracefully defaults to deterministic thresholds with `source: "fallback"` without crashing Express.
+- **Manual Trigger in UI**: Gemini is only invoked upon explicit user interaction in the UI to minimize token usage and prevent automated runaway calls.
+- **No Early Notification or Cron Logic**: Automated cron jobs and WhatsApp/Twilio alerts remain cleanly partitioned for Phase 5+.

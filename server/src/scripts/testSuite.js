@@ -17,6 +17,8 @@ const InventoryItem = require("../models/InventoryItem");
 const Sale = require("../models/Sale");
 const errorHandler = require("../utils/errorHandler");
 const inventoryAnalysisService = require("../services/inventoryAnalysisService");
+const aiService = require("../services/aiService");
+const { validateAIResponse } = require("../utils/aiResponseValidator");
 
 test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
   let server;
@@ -134,17 +136,146 @@ test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
     },
   );
 
-  // Test 6: AI Service Stub Isolation
+  // Phase 4 AI Response Validator Unit Tests
   await t.test(
-    "aiService throws appropriate placeholder error without crashing",
+    "Phase 4 Unit Test 1 — validateAIResponse accepts valid schema conforming response",
+    () => {
+      const valid = {
+        urgency: "HIGH",
+        recommendedAction: "REORDER_SOON",
+        reason: "Stock may run out within 4 days.",
+      };
+      const result = validateAIResponse(valid);
+      assert.equal(result.isValid, true);
+      assert.equal(result.sanitized.urgency, "HIGH");
+      assert.equal(result.sanitized.recommendedAction, "REORDER_SOON");
+    },
+  );
+
+  await t.test(
+    "Phase 4 Unit Test 2 — validateAIResponse rejects invalid urgency",
+    () => {
+      const invalid = {
+        urgency: "EXTREME",
+        recommendedAction: "REORDER_NOW",
+        reason: "Out of bounds urgency",
+      };
+      const result = validateAIResponse(invalid);
+      assert.equal(result.isValid, false);
+      assert.match(result.error, /Invalid urgency/);
+    },
+  );
+
+  await t.test(
+    "Phase 4 Unit Test 3 — validateAIResponse rejects invalid recommendedAction",
+    () => {
+      const invalid = {
+        urgency: "LOW",
+        recommendedAction: "DO_NOTHING",
+        reason: "Invalid action",
+      };
+      const result = validateAIResponse(invalid);
+      assert.equal(result.isValid, false);
+      assert.match(result.error, /Invalid recommendedAction/);
+    },
+  );
+
+  await t.test(
+    "Phase 4 Unit Test 4 — validateAIResponse rejects empty or non-string reason",
+    () => {
+      const emptyReason = {
+        urgency: "LOW",
+        recommendedAction: "MONITOR",
+        reason: "   ",
+      };
+      const result = validateAIResponse(emptyReason);
+      assert.equal(result.isValid, false);
+      assert.match(result.error, /non-empty string/);
+    },
+  );
+
+  // Phase 4 Deterministic Fallback Unit Tests
+  await t.test(
+    "Phase 4 Unit Test 5 — Fallback returns CRITICAL / REORDER_NOW when stockout <= 2 days",
+    () => {
+      const fallback = aiService.calculateFallback({
+        daysUntilStockout: 1.5,
+        status: "STOCKOUT_RISK",
+        salesVelocity: 10,
+      });
+      assert.equal(fallback.urgency, "CRITICAL");
+      assert.equal(fallback.recommendedAction, "REORDER_NOW");
+      assert.equal(fallback.source, "fallback");
+    },
+  );
+
+  await t.test(
+    "Phase 4 Unit Test 6 — Fallback returns HIGH / REORDER_SOON when stockout <= 7 days",
+    () => {
+      const fallback = aiService.calculateFallback({
+        daysUntilStockout: 4.5,
+        status: "STOCKOUT_RISK",
+        salesVelocity: 6,
+      });
+      assert.equal(fallback.urgency, "HIGH");
+      assert.equal(fallback.recommendedAction, "REORDER_SOON");
+      assert.equal(fallback.source, "fallback");
+    },
+  );
+
+  await t.test(
+    "Phase 4 Unit Test 7 — Fallback returns MEDIUM / PLAN_REORDER when status is LOW_STOCK",
+    () => {
+      const fallback = aiService.calculateFallback({
+        daysUntilStockout: 12,
+        status: "LOW_STOCK",
+        currentStock: 10,
+        reorderThreshold: 20,
+      });
+      assert.equal(fallback.urgency, "MEDIUM");
+      assert.equal(fallback.recommendedAction, "PLAN_REORDER");
+      assert.equal(fallback.source, "fallback");
+    },
+  );
+
+  await t.test(
+    "Phase 4 Unit Test 8 — Fallback returns LOW / MONITOR for healthy stock levels",
+    () => {
+      const fallback = aiService.calculateFallback({
+        daysUntilStockout: 30,
+        status: "HEALTHY",
+      });
+      assert.equal(fallback.urgency, "LOW");
+      assert.equal(fallback.recommendedAction, "MONITOR");
+      assert.equal(fallback.source, "fallback");
+    },
+  );
+
+  await t.test(
+    "Phase 4 Unit Test 9 — aiService handles missing or disabled Gemini safely with fallback",
     async () => {
-      const aiService = require("../services/aiService");
-      await assert.rejects(
-        async () => {
-          await aiService.analyzeInventoryRisk([]);
-        },
-        { message: "AI Service not implemented in Phase 1" },
-      );
+      const originalKey = process.env.GEMINI_API_KEY;
+      delete process.env.GEMINI_API_KEY;
+      const originalClient = aiService._client;
+      aiService._client = null;
+
+      try {
+        const result = await aiService.analyzeInventoryRisk({
+          name: "Test Cotton",
+          sku: "COT-01",
+          currentStock: 10,
+          reorderThreshold: 20,
+          status: "LOW_STOCK",
+          daysUntilStockout: 14,
+        });
+
+        assert.equal(result.source, "fallback");
+        assert.equal(result.urgency, "MEDIUM");
+        assert.equal(result.recommendedAction, "PLAN_REORDER");
+      } finally {
+        if (originalKey) process.env.GEMINI_API_KEY = originalKey;
+        aiService._client = originalClient;
+      }
     },
   );
 
@@ -328,6 +459,102 @@ test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
 
         const resZero = await fetch(`${baseUrl}/api/inventory/analysis?days=0`);
         assert.equal(resZero.status, 400);
+      },
+    );
+
+    // Phase 4 Integration Test 10: Single Item AI Risk Analysis Endpoint
+    await t.test(
+      "POST /api/inventory/:id/ai-analysis returns structured AI decision with deterministic baseline",
+      async () => {
+        const res = await fetch(
+          `${baseUrl}/api/inventory/${testItemId}/ai-analysis?days=7`,
+          { method: "POST" },
+        );
+        const body = await res.json();
+
+        assert.equal(res.status, 200);
+        assert.equal(body.success, true);
+        assert.equal(body.data.inventory.id, testItemId);
+        assert.equal(body.data.deterministicAnalysis.status, "HEALTHY");
+        assert.ok(body.data.aiAnalysis);
+        assert.ok(
+          ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(
+            body.data.aiAnalysis.urgency,
+          ),
+        );
+        assert.ok(
+          ["MONITOR", "PLAN_REORDER", "REORDER_SOON", "REORDER_NOW"].includes(
+            body.data.aiAnalysis.recommendedAction,
+          ),
+        );
+        assert.ok(body.data.aiAnalysis.reason.length > 0);
+        assert.ok(["gemini", "fallback"].includes(body.data.aiAnalysis.source));
+      },
+    );
+
+    // Phase 4 Integration Test 11: 404 on Missing Item
+    await t.test(
+      "POST /api/inventory/:id/ai-analysis returns 404 for nonexistent item",
+      async () => {
+        const fakeId = new mongoose.Types.ObjectId().toString();
+        const res404 = await fetch(
+          `${baseUrl}/api/inventory/${fakeId}/ai-analysis`,
+          { method: "POST" },
+        );
+        assert.equal(res404.status, 404);
+      },
+    );
+
+    // Phase 4 Integration Test 12: Candidate-Only Batch AI Analysis (Healthy Items Excluded)
+    await t.test(
+      "POST /api/inventory/ai-analysis filters out healthy items and only evaluates risk candidates",
+      async () => {
+        // Create an explicit low-stock candidate
+        const lowStockCandidate = await InventoryItem.create({
+          name: "Low Stock Candidate Item",
+          sku: `CAND-${Date.now()}`,
+          category: "Testing",
+          currentStock: 5,
+          reorderThreshold: 25,
+          unitPrice: 50,
+          supplier: "Candidate Supplier",
+        });
+
+        try {
+          const res = await fetch(
+            `${baseUrl}/api/inventory/ai-analysis?days=7`,
+            {
+              method: "POST",
+            },
+          );
+          const body = await res.json();
+
+          assert.equal(res.status, 200);
+          assert.equal(body.success, true);
+          assert.ok(Array.isArray(body.data));
+
+          // Verify healthy test item is EXCLUDED from candidates
+          const foundHealthy = body.data.some(
+            (c) => c.inventory.id === testItemId,
+          );
+          assert.equal(
+            foundHealthy,
+            false,
+            "Healthy item must be excluded from AI analysis candidates",
+          );
+
+          // Verify low-stock item is INCLUDED in candidates
+          const foundLowStock = body.data.some(
+            (c) => c.inventory.id === lowStockCandidate._id.toString(),
+          );
+          assert.equal(
+            foundLowStock,
+            true,
+            "Low-stock item must be included in AI analysis candidates",
+          );
+        } finally {
+          await InventoryItem.findByIdAndDelete(lowStockCandidate._id);
+        }
       },
     );
 

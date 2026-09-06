@@ -72,6 +72,31 @@ export const inventoryService = {
     const response = await api.get(`/inventory/${id}/analysis`, { params });
     return response.data.data;
   },
+
+  /**
+   * Trigger Gemini AI risk analysis for a single inventory item
+   * @param {string} id - Inventory item ID
+   * @param {number} [days] - Optional analysis window in days
+   */
+  async getAiAnalysis(id, days) {
+    const params = days ? { days } : {};
+    const response = await api.post(
+      `/inventory/${id}/ai-analysis`,
+      {},
+      { params },
+    );
+    return response.data.data;
+  },
+
+  /**
+   * Trigger Gemini AI risk analysis for all candidates needing attention
+   * @param {number} [days] - Optional analysis window in days
+   */
+  async getBatchAiAnalysis(days) {
+    const params = days ? { days } : {};
+    const response = await api.post("/inventory/ai-analysis", {}, { params });
+    return response.data.data;
+  },
 };
 
 export default inventoryService;

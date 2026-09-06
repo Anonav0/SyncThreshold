@@ -9,11 +9,19 @@ const {
   updateInventoryItem,
   deleteInventoryItem,
 } = require("../controllers/inventoryController");
+const {
+  analyzeItemRisk,
+  analyzeCandidatesRisk,
+} = require("../controllers/aiController");
 
 // Base routes
 router.route("/").get(getInventory).post(createInventoryItem);
 
-// Analysis routes (must be declared before /:id)
+// AI Risk Analysis routes (declared before /:id)
+router.post("/ai-analysis", analyzeCandidatesRisk);
+router.post("/:id/ai-analysis", analyzeItemRisk);
+
+// Deterministic Analysis routes (must be declared before /:id)
 router.get("/analysis", getInventoryAnalysis);
 router.get("/:id/analysis", getSingleInventoryAnalysis);
 

@@ -6,8 +6,11 @@ import {
   Clock,
   RefreshCw,
   Search,
+  Sparkles,
+  ArrowUpRight,
 } from "lucide-react";
 import inventoryService from "../services/inventoryService";
+import AIAnalysisModal from "./AIAnalysisModal";
 
 export default function InventoryIntelligenceTable({ onRecordSale }) {
   const [analysisData, setAnalysisData] = useState([]);
@@ -16,6 +19,12 @@ export default function InventoryIntelligenceTable({ onRecordSale }) {
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
+
+  // AI Modal and Action states
+  const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [aiModalData, setAiModalData] = useState(null);
+  const [aiLoadingId, setAiLoadingId] = useState(null);
+  const [aiItemCache, setAiItemCache] = useState({});
 
   const fetchAnalysis = useCallback(async () => {
     try {
@@ -48,6 +57,8 @@ export default function InventoryIntelligenceTable({ onRecordSale }) {
     lowStock: safeData.filter((i) => i && i.status === "LOW_STOCK").length,
   };
 
+  const candidatesCount = counts.stockoutRisk + counts.lowStock;
+
   // Filter items safely
   const filteredData = safeData.filter((item) => {
     if (!item) return false;
@@ -60,6 +71,61 @@ export default function InventoryIntelligenceTable({ onRecordSale }) {
       filterStatus === "ALL" || item.status === filterStatus;
     return matchesSearch && matchesStatus;
   });
+
+  const handleAnalyzeItem = async (itemId) => {
+    try {
+      setAiLoadingId(itemId);
+      setAiModalOpen(true);
+      setAiModalData(null);
+      const result = await inventoryService.getAiAnalysis(itemId, daysWindow);
+      setAiModalData(result);
+      if (itemId) {
+        setAiItemCache((prev) => ({ ...prev, [itemId]: result.aiAnalysis }));
+      }
+    } catch (err) {
+      setAiModalData({
+        inventory: { name: "Analysis Failed" },
+        aiAnalysis: {
+          urgency: "LOW",
+          recommendedAction: "MONITOR",
+          reason:
+            err.message || "Failed to communicate with AI analysis service.",
+          source: "fallback",
+        },
+      });
+    } finally {
+      setAiLoadingId(null);
+    }
+  };
+
+  const handleBatchAnalyze = async () => {
+    try {
+      setAiLoadingId("batch");
+      const results = await inventoryService.getBatchAiAnalysis(daysWindow);
+      if (results && results.length > 0) {
+        // Update local cache for all candidates
+        const newCache = { ...aiItemCache };
+        results.forEach((r) => {
+          if (r?.inventory?.id) {
+            newCache[r.inventory.id] = r.aiAnalysis;
+          }
+        });
+        setAiItemCache(newCache);
+
+        // Open modal displaying the highest risk candidate
+        setAiModalData(results[0]);
+        setAiModalOpen(true);
+      } else {
+        alert(
+          "All catalog items are currently healthy. No items require AI reorder intervention.",
+        );
+      }
+    } catch (err) {
+      alert(`Batch AI Analysis failed: ${err.message}`);
+    } finally {
+      setAiLoadingId(null);
+    }
+  };
 
   const getStatusBadge = (status) => {
     switch (status) {
@@ -99,25 +165,41 @@ export default function InventoryIntelligenceTable({ onRecordSale }) {
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900 tracking-tight">
-                Inventory Intelligence & Sales Velocity
+                Inventory Intelligence & Gemini AI
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Deterministic stockout estimates and risk indicators derived
-                from live sales data.
+                Deterministic stockout projections paired with contextual Google
+                Gemini AI reasoning.
               </p>
             </div>
           </div>
         </div>
 
-        {/* Controls: Days Window & Refresh */}
-        <div className="flex items-center space-x-3">
+        {/* Controls: Batch AI, Days Window & Refresh */}
+        <div className="flex flex-wrap items-center gap-3">
+          {candidatesCount > 0 && (
+            <button
+              onClick={handleBatchAnalyze}
+              disabled={aiLoadingId !== null}
+              className="inline-flex items-center px-3.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+              title="Evaluate all at-risk products with Gemini AI"
+            >
+              {aiLoadingId === "batch" ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin mr-1.5" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5 mr-1.5 text-purple-200" />
+              )}
+              Analyze Candidates ({candidatesCount})
+            </button>
+          )}
+
           <div className="flex items-center space-x-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600">
             <span className="px-2 text-slate-400">Period:</span>
             {[7, 14, 30].map((days) => (
               <button
                 key={days}
                 onClick={() => setDaysWindow(days)}
-                className={`px-3 py-1 rounded-lg transition-colors ${
+                className={`px-3 py-1 rounded-lg transition-colors cursor-pointer ${
                   daysWindow === days
                     ? "bg-white text-indigo-600 shadow-sm font-bold"
                     : "text-slate-600 hover:text-slate-900"
@@ -131,7 +213,7 @@ export default function InventoryIntelligenceTable({ onRecordSale }) {
           <button
             onClick={fetchAnalysis}
             disabled={loading}
-            className="p-2 text-slate-600 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors shadow-sm disabled:opacity-50"
+            className="p-2 text-slate-600 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
             title="Recalculate Intelligence"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
@@ -144,7 +226,7 @@ export default function InventoryIntelligenceTable({ onRecordSale }) {
         <div className="flex items-center space-x-2 overflow-x-auto text-xs">
           <button
             onClick={() => setFilterStatus("ALL")}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
+            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
               filterStatus === "ALL"
                 ? "bg-slate-900 text-white"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -154,7 +236,7 @@ export default function InventoryIntelligenceTable({ onRecordSale }) {
           </button>
           <button
             onClick={() => setFilterStatus("LOW_STOCK")}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
+            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
               filterStatus === "LOW_STOCK"
                 ? "bg-rose-600 text-white"
                 : "bg-rose-50 text-rose-700 hover:bg-rose-100"
@@ -164,7 +246,7 @@ export default function InventoryIntelligenceTable({ onRecordSale }) {
           </button>
           <button
             onClick={() => setFilterStatus("STOCKOUT_RISK")}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
+            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
               filterStatus === "STOCKOUT_RISK"
                 ? "bg-amber-600 text-white"
                 : "bg-amber-50 text-amber-700 hover:bg-amber-100"
@@ -174,7 +256,7 @@ export default function InventoryIntelligenceTable({ onRecordSale }) {
           </button>
           <button
             onClick={() => setFilterStatus("HEALTHY")}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
+            className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
               filterStatus === "HEALTHY"
                 ? "bg-emerald-600 text-white"
                 : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
@@ -214,7 +296,7 @@ export default function InventoryIntelligenceTable({ onRecordSale }) {
             </p>
             <button
               onClick={fetchAnalysis}
-              className="mt-3 px-3 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800"
+              className="mt-3 px-3 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 cursor-pointer"
             >
               Retry Analysis
             </button>
@@ -234,12 +316,15 @@ export default function InventoryIntelligenceTable({ onRecordSale }) {
                 <th className="px-6 py-3.5">Sales Velocity</th>
                 <th className="px-6 py-3.5">Days Until Stockout</th>
                 <th className="px-6 py-3.5">Deterministic Status</th>
+                <th className="px-6 py-3.5 text-right">AI Risk Analysis</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 font-normal">
               {filteredData.map((item) => {
                 const isWarning = item.status === "STOCKOUT_RISK";
                 const isDanger = item.status === "LOW_STOCK";
+                const isAnalyzing = aiLoadingId === item.inventoryItemId;
+                const cachedAi = aiItemCache[item.inventoryItemId];
 
                 return (
                   <tr
@@ -303,6 +388,48 @@ export default function InventoryIntelligenceTable({ onRecordSale }) {
                       )}
                     </td>
                     <td className="px-6 py-4">{getStatusBadge(item.status)}</td>
+                    <td className="px-6 py-4 text-right">
+                      {cachedAi ? (
+                        <button
+                          onClick={() =>
+                            handleAnalyzeItem(item.inventoryItemId)
+                          }
+                          disabled={isAnalyzing}
+                          className="inline-flex items-center px-2.5 py-1.5 rounded-xl text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors cursor-pointer"
+                          title="View or re-run AI recommendation"
+                        >
+                          <span className="font-bold mr-1">
+                            {cachedAi.urgency}:
+                          </span>
+                          <span className="text-xs">
+                            {cachedAi.recommendedAction?.replace("_", " ")}
+                          </span>
+                          <ArrowUpRight className="w-3 h-3 ml-1 text-purple-500" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() =>
+                            handleAnalyzeItem(item.inventoryItemId)
+                          }
+                          disabled={isAnalyzing}
+                          className={`inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-semibold shadow-2xs transition-all cursor-pointer ${
+                            isDanger || isWarning
+                              ? "bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-indigo-100"
+                              : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-200"
+                          } disabled:opacity-50`}
+                          title="Trigger Google Gemini AI Risk Analysis"
+                        >
+                          {isAnalyzing ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin mr-1.5" />
+                          ) : (
+                            <Sparkles
+                              className={`w-3.5 h-3.5 mr-1.5 ${isDanger || isWarning ? "text-purple-200" : "text-purple-600"}`}
+                            />
+                          )}
+                          Analyze with Gemini
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -310,6 +437,19 @@ export default function InventoryIntelligenceTable({ onRecordSale }) {
           </table>
         )}
       </div>
+
+      {/* AI Analysis Modal */}
+      <AIAnalysisModal
+        isOpen={aiModalOpen}
+        onClose={() => setAiModalOpen(false)}
+        data={aiModalData}
+        loading={aiLoadingId !== null && !aiModalData}
+        onRetry={
+          aiModalData?.inventory?.id
+            ? () => handleAnalyzeItem(aiModalData.inventory.id)
+            : null
+        }
+      />
     </div>
   );
 }
