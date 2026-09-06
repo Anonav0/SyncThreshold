@@ -254,7 +254,7 @@ export default function AutomationStatusCard({ onRunComplete }) {
             </span>
           </div>
 
-          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 text-center text-xs">
+          <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-9 gap-2 text-center text-xs">
             <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
               <div className="text-slate-500 text-2xs">Items Checked</div>
               <div className="text-base font-bold text-slate-900 mt-0.5">
@@ -283,6 +283,24 @@ export default function AutomationStatusCard({ onRunComplete }) {
               <div className="text-slate-500 text-2xs">Fallbacks</div>
               <div className="text-base font-bold text-slate-700 mt-0.5">
                 {summary.fallbackAnalyses ?? 0}
+              </div>
+            </div>
+            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+              <div className="text-slate-500 text-2xs">Alerts Created</div>
+              <div className="text-base font-bold text-rose-600 mt-0.5">
+                {summary.alertsCreated ?? 0}
+              </div>
+            </div>
+            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+              <div className="text-slate-500 text-2xs">Alerts Reused</div>
+              <div className="text-base font-bold text-amber-600 mt-0.5">
+                {summary.alertsReused ?? 0}
+              </div>
+            </div>
+            <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+              <div className="text-slate-500 text-2xs">Alerts Resolved</div>
+              <div className="text-base font-bold text-emerald-600 mt-0.5">
+                {summary.alertsResolved ?? 0}
               </div>
             </div>
             <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">

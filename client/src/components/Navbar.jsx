@@ -38,8 +38,8 @@ export default function Navbar({ activeTab, setActiveTab }) {
               <span className="text-xl font-bold text-slate-900 tracking-tight">
                 SyncThreshold
               </span>
-              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
-                Phase 5 • Automated Monitoring
+              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                Phase 6 • Alert Persistence
               </span>
             </div>
           </div>

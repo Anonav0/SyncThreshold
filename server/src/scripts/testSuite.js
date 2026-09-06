@@ -25,6 +25,8 @@ const {
   startInventoryScheduler,
   stopInventoryScheduler,
 } = require("../jobs/inventoryMonitor");
+const Alert = require("../models/Alert");
+const alertService = require("../services/alertService");
 
 test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
   let server;
@@ -360,6 +362,219 @@ test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
     },
   );
 
+  // Phase 6 Alert Persistence & Duplicate Prevention Unit Tests
+  await t.test(
+    "Phase 6 Unit Test 1 — createAlertIfNeeded creates a new active alert when none exists",
+    async () => {
+      const dummyItemId = new mongoose.Types.ObjectId();
+      const outcome = await alertService.createAlertIfNeeded({
+        inventoryItemId: dummyItemId,
+        alertType: "LOW_STOCK",
+        urgency: "HIGH",
+        recommendedAction: "REORDER_SOON",
+        reason: "Test low stock alert",
+        source: "fallback",
+      });
+
+      assert.equal(outcome.created, true);
+      assert.equal(outcome.reused, false);
+      assert.equal(outcome.alert.status, "ACTIVE");
+      assert.equal(outcome.alert.alertType, "LOW_STOCK");
+      assert.equal(outcome.alert.urgency, "HIGH");
+
+      await Alert.deleteMany({ inventoryItemId: dummyItemId });
+    },
+  );
+
+  await t.test(
+    "Phase 6 Unit Test 2 — createAlertIfNeeded prevents duplicate alerts and reuses existing active alert",
+    async () => {
+      const dummyItemId = new mongoose.Types.ObjectId();
+      const first = await alertService.createAlertIfNeeded({
+        inventoryItemId: dummyItemId,
+        alertType: "LOW_STOCK",
+        urgency: "HIGH",
+        recommendedAction: "REORDER_SOON",
+        reason: "First run alert",
+        source: "fallback",
+      });
+      assert.equal(first.created, true);
+
+      // Second run with same item and alertType
+      const second = await alertService.createAlertIfNeeded({
+        inventoryItemId: dummyItemId,
+        alertType: "LOW_STOCK",
+        urgency: "CRITICAL",
+        recommendedAction: "REORDER_NOW",
+        reason: "Second run attempt",
+        source: "gemini",
+      });
+
+      assert.equal(second.created, false);
+      assert.equal(second.reused, true);
+      assert.equal(second.alert._id.toString(), first.alert._id.toString());
+
+      const count = await Alert.countDocuments({
+        inventoryItemId: dummyItemId,
+        alertType: "LOW_STOCK",
+        status: "ACTIVE",
+      });
+      assert.equal(count, 1, "Only one active alert must exist in DB");
+
+      await Alert.deleteMany({ inventoryItemId: dummyItemId });
+    },
+  );
+
+  await t.test(
+    "Phase 6 Unit Test 3 — MongoDB partial unique index prevents duplicate active alerts",
+    async () => {
+      const dummyItemId = new mongoose.Types.ObjectId();
+      await Alert.syncIndexes();
+
+      await Alert.create({
+        inventoryItemId: dummyItemId,
+        alertType: "STOCKOUT_RISK",
+        urgency: "CRITICAL",
+        recommendedAction: "REORDER_NOW",
+        reason: "Index test alert 1",
+        source: "gemini",
+        status: "ACTIVE",
+      });
+
+      // Attempting to create duplicate active alert must throw duplicate key error code 11000
+      await assert.rejects(
+        async () => {
+          await Alert.create({
+            inventoryItemId: dummyItemId,
+            alertType: "STOCKOUT_RISK",
+            urgency: "HIGH",
+            recommendedAction: "REORDER_SOON",
+            reason: "Duplicate active alert attempt",
+            source: "fallback",
+            status: "ACTIVE",
+          });
+        },
+        (err) => {
+          assert.ok(
+            err.code === 11000 ||
+              (err.message && err.message.includes("E11000")),
+          );
+          return true;
+        },
+      );
+
+      await Alert.deleteMany({ inventoryItemId: dummyItemId });
+    },
+  );
+
+  await t.test(
+    "Phase 6 Unit Test 4 — Different alert types (LOW_STOCK and STOCKOUT_RISK) can coexist as active alerts",
+    async () => {
+      const dummyItemId = new mongoose.Types.ObjectId();
+
+      const lowStock = await alertService.createAlertIfNeeded({
+        inventoryItemId: dummyItemId,
+        alertType: "LOW_STOCK",
+        urgency: "MEDIUM",
+        recommendedAction: "PLAN_REORDER",
+        reason: "Low stock alert",
+        source: "fallback",
+      });
+
+      const stockoutRisk = await alertService.createAlertIfNeeded({
+        inventoryItemId: dummyItemId,
+        alertType: "STOCKOUT_RISK",
+        urgency: "HIGH",
+        recommendedAction: "REORDER_SOON",
+        reason: "Stockout risk alert",
+        source: "gemini",
+      });
+
+      assert.equal(lowStock.created, true);
+      assert.equal(stockoutRisk.created, true);
+
+      const count = await Alert.countDocuments({
+        inventoryItemId: dummyItemId,
+        status: "ACTIVE",
+      });
+      assert.equal(count, 2, "Both alert types must coexist for the same item");
+
+      await Alert.deleteMany({ inventoryItemId: dummyItemId });
+    },
+  );
+
+  await t.test(
+    "Phase 6 Unit Test 5 — resolveAlertsIfNeeded resolves LOW_STOCK when stock recovers to threshold",
+    async () => {
+      const dummyItemId = new mongoose.Types.ObjectId();
+
+      await alertService.createAlertIfNeeded({
+        inventoryItemId: dummyItemId,
+        alertType: "LOW_STOCK",
+        urgency: "HIGH",
+        recommendedAction: "REORDER_SOON",
+        reason: "Needs reorder",
+        source: "fallback",
+      });
+
+      // Resolve when currentStock (25) >= reorderThreshold (20)
+      const res = await alertService.resolveAlertsIfNeeded({
+        inventoryItemId: dummyItemId,
+        currentStock: 25,
+        reorderThreshold: 20,
+        status: "HEALTHY",
+      });
+
+      assert.equal(res.resolvedCount, 1);
+      const updated = await Alert.findById(res.resolvedAlerts[0]._id);
+      assert.equal(updated.status, "RESOLVED");
+      assert.ok(updated.resolvedAt !== null);
+
+      await Alert.deleteMany({ inventoryItemId: dummyItemId });
+    },
+  );
+
+  await t.test(
+    "Phase 6 Unit Test 6 — resolveObsoleteAlerts resolves STOCKOUT_RISK when risk clears",
+    async () => {
+      const dummyItemId = new mongoose.Types.ObjectId();
+
+      const created = await alertService.createAlertIfNeeded({
+        inventoryItemId: dummyItemId,
+        alertType: "STOCKOUT_RISK",
+        urgency: "CRITICAL",
+        recommendedAction: "REORDER_NOW",
+        reason: "Imminent stockout",
+        source: "gemini",
+      });
+
+      // Audit shows item is now HEALTHY
+      const catalogAnalysis = [
+        {
+          inventoryItemId: dummyItemId,
+          currentStock: 50,
+          reorderThreshold: 20,
+          salesVelocity: 1,
+          daysUntilStockout: 50,
+          status: "HEALTHY",
+        },
+      ];
+
+      const res = await alertService.resolveObsoleteAlerts(catalogAnalysis);
+      assert.equal(res.resolvedCount, 1);
+
+      const stored = await Alert.findById(created.alert._id);
+      assert.equal(stored.status, "RESOLVED");
+      assert.ok(stored.resolvedAt !== null);
+
+      // Verify resolved alert remains in DB (not deleted)
+      const allForProduct = await Alert.find({ inventoryItemId: dummyItemId });
+      assert.equal(allForProduct.length, 1);
+
+      await Alert.deleteMany({ inventoryItemId: dummyItemId });
+    },
+  );
+
   // Phase 3 Calculation Unit Tests
   await t.test(
     "Phase 3 Unit Test 1 — Sales velocity calculation (56 units / 7 days = 8 units/day)",
@@ -691,6 +906,133 @@ test("Backend Foundation, Sales & Intelligence Test Suite", async (t) => {
         } finally {
           inventoryAutomationService.isRunning = false;
         }
+      },
+    );
+
+    // Phase 6 Integration Test 7: GET /api/alerts returns alerts list with filters
+    await t.test(
+      "GET /api/alerts returns 200 with list of alerts and supports ?status=ACTIVE filter",
+      async () => {
+        const dummyItemId = new mongoose.Types.ObjectId();
+        const created = await Alert.create({
+          inventoryItemId: dummyItemId,
+          alertType: "LOW_STOCK",
+          urgency: "MEDIUM",
+          recommendedAction: "PLAN_REORDER",
+          reason: "Filter test alert",
+          source: "fallback",
+          status: "ACTIVE",
+        });
+
+        try {
+          const res = await fetch(`${baseUrl}/api/alerts?status=ACTIVE`);
+          const body = await res.json();
+          assert.equal(res.status, 200);
+          assert.equal(body.success, true);
+          assert.ok(Array.isArray(body.data));
+          assert.ok(body.data.some((a) => a._id === created._id.toString()));
+        } finally {
+          await Alert.findByIdAndDelete(created._id);
+        }
+      },
+    );
+
+    // Phase 6 Integration Test 8: GET /api/alerts/active returns active alerts
+    await t.test(
+      "GET /api/alerts/active returns 200 and only active alerts",
+      async () => {
+        const res = await fetch(`${baseUrl}/api/alerts/active`);
+        const body = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(body.success, true);
+        assert.ok(Array.isArray(body.data));
+        assert.ok(body.data.every((a) => a.status === "ACTIVE"));
+      },
+    );
+
+    // Phase 6 Integration Test 9: GET /api/alerts/:id returns single alert
+    await t.test(
+      "GET /api/alerts/:id returns 200 for existing alert and 404 for missing alert",
+      async () => {
+        const dummyItemId = new mongoose.Types.ObjectId();
+        const created = await Alert.create({
+          inventoryItemId: dummyItemId,
+          alertType: "STOCKOUT_RISK",
+          urgency: "HIGH",
+          recommendedAction: "REORDER_SOON",
+          reason: "ID lookup test alert",
+          source: "fallback",
+          status: "ACTIVE",
+        });
+
+        try {
+          const res200 = await fetch(`${baseUrl}/api/alerts/${created._id}`);
+          const body200 = await res200.json();
+          assert.equal(res200.status, 200);
+          assert.equal(body200.success, true);
+          assert.equal(body200.data._id, created._id.toString());
+
+          const fakeId = new mongoose.Types.ObjectId();
+          const res404 = await fetch(`${baseUrl}/api/alerts/${fakeId}`);
+          assert.equal(res404.status, 404);
+        } finally {
+          await Alert.findByIdAndDelete(created._id);
+        }
+      },
+    );
+
+    // Phase 6 Integration Test 10: GET /api/alerts/inventory/:id
+    await t.test(
+      "GET /api/alerts/inventory/:inventoryItemId returns all alerts for item",
+      async () => {
+        const dummyItemId = new mongoose.Types.ObjectId();
+        const alert1 = await Alert.create({
+          inventoryItemId: dummyItemId,
+          alertType: "LOW_STOCK",
+          urgency: "LOW",
+          recommendedAction: "MONITOR",
+          reason: "Item alert 1",
+          source: "fallback",
+          status: "RESOLVED",
+          resolvedAt: new Date(),
+        });
+        const alert2 = await Alert.create({
+          inventoryItemId: dummyItemId,
+          alertType: "STOCKOUT_RISK",
+          urgency: "HIGH",
+          recommendedAction: "REORDER_SOON",
+          reason: "Item alert 2",
+          source: "fallback",
+          status: "ACTIVE",
+        });
+
+        try {
+          const res = await fetch(
+            `${baseUrl}/api/alerts/inventory/${dummyItemId}`,
+          );
+          const body = await res.json();
+          assert.equal(res.status, 200);
+          assert.equal(body.success, true);
+          assert.equal(body.data.length, 2);
+        } finally {
+          await Alert.deleteMany({ inventoryItemId: dummyItemId });
+        }
+      },
+    );
+
+    // Phase 6 Integration Test 11: POST /api/automation/inventory-check summary includes alert counts
+    await t.test(
+      "POST /api/automation/inventory-check summary contains alertsCreated, alertsReused, alertsResolved",
+      async () => {
+        const res = await fetch(`${baseUrl}/api/automation/inventory-check`, {
+          method: "POST",
+        });
+        const body = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(body.success, true);
+        assert.ok(typeof body.data.alertsCreated === "number");
+        assert.ok(typeof body.data.alertsReused === "number");
+        assert.ok(typeof body.data.alertsResolved === "number");
       },
     );
 

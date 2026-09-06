@@ -12,6 +12,7 @@ const connectDB = require("./src/config/database");
 const inventoryRoutes = require("./src/routes/inventoryRoutes");
 const salesRoutes = require("./src/routes/salesRoutes");
 const automationRoutes = require("./src/routes/automationRoutes");
+const alertRoutes = require("./src/routes/alertRoutes");
 const errorHandler = require("./src/utils/errorHandler");
 const { startInventoryScheduler } = require("./src/jobs/inventoryMonitor");
 
@@ -33,6 +34,7 @@ app.get("/api/health", (req, res) => {
 app.use("/api/inventory", inventoryRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/automation", automationRoutes);
+app.use("/api/alerts", alertRoutes);
 
 // Catch-all 404 handler for undefined routes
 app.use("*", (req, res) => {

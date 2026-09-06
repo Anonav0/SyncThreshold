@@ -16,6 +16,7 @@
 
 const inventoryAnalysisService = require("./inventoryAnalysisService");
 const aiService = require("./aiService");
+const alertService = require("./alertService");
 
 class InventoryAutomationService {
   constructor() {
@@ -79,6 +80,9 @@ class InventoryAutomationService {
     let aiAnalyses = 0;
     let geminiSuccesses = 0;
     let fallbackAnalyses = 0;
+    let alertsCreated = 0;
+    let alertsReused = 0;
+    let alertsResolved = 0;
     let errors = 0;
     const candidateResults = [];
 
@@ -142,6 +146,29 @@ class InventoryAutomationService {
           }
 
           aiAnalyses++;
+
+          // Phase 6: Alert Persistence & Duplicate-Alert Prevention
+          try {
+            const alertOutcome = await alertService.createAlertIfNeeded({
+              inventoryItemId: candidate.inventoryItemId,
+              alertType: candidate.status,
+              urgency: aiResult.urgency,
+              recommendedAction: aiResult.recommendedAction,
+              reason: aiResult.reason,
+              source: aiResult.source,
+            });
+
+            if (alertOutcome.created) {
+              alertsCreated++;
+            } else if (alertOutcome.reused) {
+              alertsReused++;
+            }
+          } catch (alertErr) {
+            console.error(
+              `[Inventory Monitor] Alert persistence error for ${sku}: ${alertErr.message}`,
+            );
+          }
+
           candidateResults.push({
             inventory: {
               id: candidate.inventoryItemId,
@@ -167,6 +194,17 @@ class InventoryAutomationService {
         }
       }
 
+      // Phase 6: Resolve obsolete active alerts for items whose risk has cleared
+      try {
+        const resolution =
+          await alertService.resolveObsoleteAlerts(allAnalysis);
+        alertsResolved = resolution.resolvedCount;
+      } catch (resolveErr) {
+        console.error(
+          `[Inventory Monitor] Alert resolution error: ${resolveErr.message}`,
+        );
+      }
+
       // 5. Determine Overall Automation Status
       let overallStatus = "SUCCESS";
       if (errors > 0) {
@@ -186,6 +224,9 @@ class InventoryAutomationService {
         aiAnalyses,
         geminiSuccesses,
         fallbackAnalyses,
+        alertsCreated,
+        alertsReused,
+        alertsResolved,
         errors,
         candidates: candidateResults,
       };
@@ -198,7 +239,7 @@ class InventoryAutomationService {
       console.log(
         `[Inventory Monitor] Automation completed with status ${overallStatus} in ${
           new Date(completedAt).getTime() - new Date(startedAt).getTime()
-        }ms. (Checked: ${itemsChecked}, Candidates: ${candidatesFound}, Gemini: ${geminiSuccesses}, Fallback: ${fallbackAnalyses}, Errors: ${errors})`,
+        }ms. (Checked: ${itemsChecked}, Candidates: ${candidatesFound}, Gemini: ${geminiSuccesses}, Fallback: ${fallbackAnalyses}, AlertsCreated: ${alertsCreated}, AlertsReused: ${alertsReused}, AlertsResolved: ${alertsResolved}, Errors: ${errors})`,
       );
 
       return summary;
@@ -215,6 +256,9 @@ class InventoryAutomationService {
         aiAnalyses,
         geminiSuccesses,
         fallbackAnalyses,
+        alertsCreated,
+        alertsReused,
+        alertsResolved,
         errors: errors + 1,
         errorMessage: criticalErr.message,
       };

@@ -192,6 +192,15 @@ The client will run on `http://localhost:5173`.
 | `GET`  | `/automation/status`          | Retrieve background cron scheduler configuration, status, and latest summary | `200`        |
 | `POST` | `/automation/inventory-check` | Manually trigger on-demand inventory check workflow (returns 409 if active)  | `200`, `409` |
 
+#### Persistent Alert Endpoints (Phase 6)
+
+| Method | Endpoint                             | Description                                                                 | Status Codes |
+| ------ | ------------------------------------ | --------------------------------------------------------------------------- | ------------ |
+| `GET`  | `/alerts`                            | Retrieve alerts history with optional filtering (`?status=`, `?alertType=`) | `200`, `400` |
+| `GET`  | `/alerts/active`                     | Retrieve only currently ACTIVE inventory alerts                             | `200`        |
+| `GET`  | `/alerts/:id`                        | Retrieve single alert record by ID                                          | `200`, `404` |
+| `GET`  | `/alerts/inventory/:inventoryItemId` | Retrieve all alerts (active & resolved) for a specific inventory item       | `200`        |
+
 ### Sample Payloads
 
 #### Automation Run Summary (`POST /api/automation/inventory-check`):
@@ -203,13 +212,16 @@ Response:
   "success": true,
   "data": {
     "status": "SUCCESS",
-    "startedAt": "2026-09-06T13:40:04.933Z",
-    "completedAt": "2026-09-06T13:40:06.179Z",
+    "startedAt": "2026-09-06T14:49:29.589Z",
+    "completedAt": "2026-09-06T14:49:41.576Z",
     "itemsChecked": 9,
     "candidatesFound": 4,
     "aiAnalyses": 4,
     "geminiSuccesses": 4,
     "fallbackAnalyses": 0,
+    "alertsCreated": 0,
+    "alertsReused": 4,
+    "alertsResolved": 0,
     "errors": 0,
     "candidates": [ ... ]
   }

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   Package,
   AlertTriangle,
@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import InventoryIntelligenceTable from "../components/InventoryIntelligenceTable";
 import AutomationStatusCard from "../components/AutomationStatusCard";
+import AlertsSection from "../components/AlertsSection";
 
 export default function Dashboard({
   items = [],
@@ -22,6 +23,7 @@ export default function Dashboard({
   onNavigateToInventory,
   onNavigateToSales,
 }) {
+  const [alertRefreshKey, setAlertRefreshKey] = useState(0);
   const safeItems = Array.isArray(items) ? items : [];
   const safeSales = Array.isArray(sales) ? sales : [];
 
@@ -67,15 +69,16 @@ export default function Dashboard({
       <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-indigo-800 rounded-2xl p-8 text-white shadow-lg relative overflow-hidden">
         <div className="relative z-10 max-w-2xl">
           <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-500/30 text-purple-100 border border-purple-400/30 mb-4">
-            Phase 5 Active • Automated Background Monitoring & Gemini AI
+            Phase 6 Active • Alert Persistence & Duplicate Prevention
           </span>
           <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
             AI Inventory Automation System
           </h1>
           <p className="mt-3 text-indigo-100 text-sm sm:text-base leading-relaxed">
             Autonomous background inventory auditing with node-cron, real-time
-            deterministic sales velocity projections, and contextual Google
-            Gemini AI reorder recommendations.
+            deterministic sales velocity projections, contextual Google Gemini
+            AI reorder recommendations, and persistent MongoDB alerts with
+            duplicate prevention.
           </p>
           <div className="mt-6 flex flex-wrap gap-4">
             <button
@@ -100,7 +103,12 @@ export default function Dashboard({
       </div>
 
       {/* Phase 5 Automated Background Monitoring Status Card */}
-      <AutomationStatusCard />
+      <AutomationStatusCard
+        onRunComplete={() => setAlertRefreshKey((k) => k + 1)}
+      />
+
+      {/* Phase 6 Persistent Inventory Alerts Section */}
+      <AlertsSection key={alertRefreshKey} />
 
       {/* Overview Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
