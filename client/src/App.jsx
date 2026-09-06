@@ -2,13 +2,19 @@ import React, { useState, useEffect, useCallback } from "react";
 import Navbar from "./components/Navbar";
 import Dashboard from "./pages/Dashboard";
 import Inventory from "./pages/Inventory";
+import Sales from "./pages/Sales";
 import inventoryService from "./services/inventoryService";
+import salesService from "./services/salesService";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("inventory");
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const [sales, setSales] = useState([]);
+  const [salesLoading, setSalesLoading] = useState(true);
+  const [salesError, setSalesError] = useState(null);
 
   const fetchItems = useCallback(async () => {
     try {
@@ -26,9 +32,42 @@ export default function App() {
     }
   }, []);
 
+  const fetchSales = useCallback(async () => {
+    try {
+      setSalesLoading(true);
+      setSalesError(null);
+      const data = await salesService.getAllSales();
+      setSales(data);
+    } catch (err) {
+      setSalesError(err.message || "Could not retrieve sales history.");
+    } finally {
+      setSalesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchItems();
-  }, [fetchItems]);
+    fetchSales();
+  }, [fetchItems, fetchSales]);
+
+  // When a sale is recorded, update both local states immediately
+  const handleSaleRecorded = (result) => {
+    if (result?.inventory) {
+      setItems((prevItems) =>
+        prevItems.map((item) =>
+          item._id === result.inventory._id ? result.inventory : item,
+        ),
+      );
+    } else {
+      fetchItems();
+    }
+
+    if (result?.sale) {
+      setSales((prevSales) => [result.sale, ...prevSales]);
+    } else {
+      fetchSales();
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -38,14 +77,28 @@ export default function App() {
         {activeTab === "dashboard" ? (
           <Dashboard
             items={items}
+            sales={sales}
             onNavigateToInventory={() => setActiveTab("inventory")}
+            onNavigateToSales={() => setActiveTab("sales")}
+          />
+        ) : activeTab === "sales" ? (
+          <Sales
+            sales={sales}
+            items={items}
+            loading={salesLoading}
+            error={salesError}
+            onRefresh={fetchSales}
+            onSaleRecorded={handleSaleRecorded}
           />
         ) : (
           <Inventory
             items={items}
             loading={loading}
             error={error}
-            onRefresh={fetchItems}
+            onRefresh={() => {
+              fetchItems();
+              fetchSales();
+            }}
           />
         )}
       </main>
@@ -54,7 +107,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4">
           <p>
             SyncThreshold — AI-Powered Inventory Reorder Automation System •
-            Phase 1 Foundation
+            Phase 2 Sales Integration
           </p>
         </div>
       </footer>

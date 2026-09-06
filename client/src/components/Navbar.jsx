@@ -1,5 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Layers, LayoutDashboard, Package, Activity } from "lucide-react";
+import {
+  Layers,
+  LayoutDashboard,
+  Package,
+  ShoppingCart,
+  Activity,
+} from "lucide-react";
 import inventoryService from "../services/inventoryService";
 
 export default function Navbar({ activeTab, setActiveTab }) {
@@ -32,8 +38,8 @@ export default function Navbar({ activeTab, setActiveTab }) {
               <span className="text-xl font-bold text-slate-900 tracking-tight">
                 SyncThreshold
               </span>
-              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">
-                Phase 1 Foundation
+              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                Phase 2 Sales Integration
               </span>
             </div>
           </div>
@@ -61,6 +67,17 @@ export default function Navbar({ activeTab, setActiveTab }) {
             >
               <Package className="w-4 h-4 mr-2" />
               Inventory
+            </button>
+            <button
+              onClick={() => setActiveTab("sales")}
+              className={`inline-flex items-center px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === "sales"
+                  ? "bg-indigo-50 text-indigo-700"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+              }`}
+            >
+              <ShoppingCart className="w-4 h-4 mr-2" />
+              Sales
             </button>
           </nav>
 

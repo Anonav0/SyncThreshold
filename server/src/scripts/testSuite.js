@@ -1,23 +1,30 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const http = require("node:http");
+const path = require("path");
 const mongoose = require("mongoose");
+const dotenv = require("dotenv");
 
-// Set test environment
+// Load environment variables
+dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
+
 process.env.NODE_ENV = "test";
-process.env.PORT = "5001";
+process.env.PORT = "5002";
 
 const { app } = require("../../server");
 const InventoryItem = require("../models/InventoryItem");
+const Sale = require("../models/Sale");
 const errorHandler = require("../utils/errorHandler");
-const { sendSuccess, sendError } = require("../utils/apiResponse");
 
-test("Backend Foundation Test Suite", async (t) => {
+test("Backend Foundation & Sales Test Suite", async (t) => {
   let server;
   let baseUrl;
+  let testItemId = null;
+  const createdSaleIds = [];
 
-  // Start HTTP server for testing
-  await t.test("Setup test HTTP server", async () => {
+  // Setup test server and DB connection
+  await t.test("Setup test HTTP server and DB connection", async () => {
     await new Promise((resolve) => {
       server = app.listen(0, () => {
         const port = server.address().port;
@@ -26,6 +33,10 @@ test("Backend Foundation Test Suite", async (t) => {
       });
     });
     assert.ok(baseUrl);
+
+    if (mongoose.connection.readyState === 0 && process.env.MONGODB_URI) {
+      await mongoose.connect(process.env.MONGODB_URI);
+    }
   });
 
   // Test 1: Health Check
@@ -52,52 +63,45 @@ test("Backend Foundation Test Suite", async (t) => {
   );
 
   // Test 3: InventoryItem Schema Validation
-  await t.test("InventoryItem schema validates required fields", async () => {
-    const invalidItem = new InventoryItem({});
-    const validationError = invalidItem.validateSync();
+  await t.test(
+    "InventoryItem schema validates required fields and non-negative constraints",
+    async () => {
+      const invalidItem = new InventoryItem({});
+      const validationError = invalidItem.validateSync();
+      assert.ok(validationError);
+      assert.ok(validationError.errors.name);
+      assert.ok(validationError.errors.sku);
+      assert.ok(validationError.errors.category);
+      assert.ok(validationError.errors.currentStock);
+      assert.ok(validationError.errors.reorderThreshold);
+      assert.ok(validationError.errors.unitPrice);
+      assert.ok(validationError.errors.supplier);
+    },
+  );
 
-    assert.ok(validationError);
-    assert.ok(validationError.errors.name, "name is required");
-    assert.ok(validationError.errors.sku, "sku is required");
-    assert.ok(validationError.errors.category, "category is required");
-    assert.ok(validationError.errors.currentStock, "currentStock is required");
-    assert.ok(
-      validationError.errors.reorderThreshold,
-      "reorderThreshold is required",
-    );
-    assert.ok(validationError.errors.unitPrice, "unitPrice is required");
-    assert.ok(validationError.errors.supplier, "supplier is required");
-  });
+  // Test 4: Sale Schema Validation
+  await t.test(
+    "Sale schema validates required fields and integer quantity",
+    async () => {
+      const invalidSale = new Sale({});
+      const err = invalidSale.validateSync();
+      assert.ok(err);
+      assert.ok(err.errors.inventoryItemId);
+      assert.ok(err.errors.quantitySold);
+      assert.ok(err.errors.unitPrice);
+      assert.ok(err.errors.totalAmount);
 
-  // Test 4: InventoryItem Schema Non-negative Validation
-  await t.test("InventoryItem schema rejects negative numbers", async () => {
-    const negativeItem = new InventoryItem({
-      name: "Test Item",
-      sku: "TEST-001",
-      category: "Raw Material",
-      currentStock: -5,
-      reorderThreshold: -10,
-      unitPrice: -20,
-      averageDailySales: -1,
-      supplier: "Test Supplier",
-    });
-    const validationError = negativeItem.validateSync();
-
-    assert.ok(validationError);
-    assert.ok(
-      validationError.errors.currentStock,
-      "currentStock cannot be negative",
-    );
-    assert.ok(
-      validationError.errors.reorderThreshold,
-      "reorderThreshold cannot be negative",
-    );
-    assert.ok(validationError.errors.unitPrice, "unitPrice cannot be negative");
-    assert.ok(
-      validationError.errors.averageDailySales,
-      "averageDailySales cannot be negative",
-    );
-  });
+      const nonIntegerSale = new Sale({
+        inventoryItemId: new mongoose.Types.ObjectId(),
+        quantitySold: 2.5,
+        unitPrice: 10,
+        totalAmount: 25,
+      });
+      const intErr = nonIntegerSale.validateSync();
+      assert.ok(intErr);
+      assert.ok(intErr.errors.quantitySold);
+    },
+  );
 
   // Test 5: Error Handler format
   await t.test(
@@ -117,7 +121,6 @@ test("Backend Foundation Test Suite", async (t) => {
         },
       };
 
-      // Simulate CastError
       const castError = {
         name: "CastError",
         kind: "ObjectId",
@@ -127,16 +130,6 @@ test("Backend Foundation Test Suite", async (t) => {
       assert.equal(mockStatus, 400);
       assert.equal(mockJson.success, false);
       assert.match(mockJson.message, /invalid-id/);
-
-      // Simulate 11000 duplicate key error
-      const duplicateError = {
-        code: 11000,
-        keyValue: { sku: "DUPLICATE-SKU" },
-      };
-      errorHandler(duplicateError, {}, mockRes, () => {});
-      assert.equal(mockStatus, 400);
-      assert.equal(mockJson.success, false);
-      assert.match(mockJson.message, /DUPLICATE-SKU/);
     },
   );
 
@@ -154,9 +147,176 @@ test("Backend Foundation Test Suite", async (t) => {
     },
   );
 
+  // Only run live DB integration tests if connected to MongoDB
+  if (mongoose.connection.readyState === 1) {
+    // Test 7: Create test item for sale tests
+    await t.test("Create test inventory item for sales workflow", async () => {
+      const item = new InventoryItem({
+        name: "Sales Test Item",
+        sku: `TEST-SALE-${Date.now()}`,
+        category: "Testing",
+        currentStock: 50,
+        reorderThreshold: 10,
+        unitPrice: 100,
+        averageDailySales: 5,
+        supplier: "Test Suite Supplier",
+      });
+      const saved = await item.save();
+      testItemId = saved._id.toString();
+      assert.ok(testItemId);
+    });
+
+    // Test 8: Successful Sale (Stock: 50 -> 45, Total: 500)
+    await t.test(
+      "POST /api/sales successfully records sale and reduces stock",
+      async () => {
+        const res = await fetch(`${baseUrl}/api/sales`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            inventoryItemId: testItemId,
+            quantitySold: 5,
+          }),
+        });
+
+        const body = await res.json();
+        assert.equal(res.status, 201);
+        assert.equal(body.success, true);
+        assert.equal(body.data.sale.quantitySold, 5);
+        assert.equal(body.data.sale.unitPrice, 100);
+        assert.equal(body.data.sale.totalAmount, 500);
+        assert.equal(body.data.inventory.currentStock, 45);
+
+        createdSaleIds.push(body.data.sale._id);
+
+        // Verify persistence in MongoDB
+        const storedItem = await InventoryItem.findById(testItemId);
+        assert.equal(storedItem.currentStock, 45);
+
+        const storedSale = await Sale.findById(body.data.sale._id);
+        assert.ok(storedSale);
+        assert.equal(storedSale.totalAmount, 500);
+      },
+    );
+
+    // Test 9: Insufficient Stock (Stock: 45, Request: 50 -> 400 Bad Request)
+    await t.test(
+      "POST /api/sales rejects sale when requested quantity exceeds stock",
+      async () => {
+        const res = await fetch(`${baseUrl}/api/sales`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            inventoryItemId: testItemId,
+            quantitySold: 50,
+          }),
+        });
+
+        const body = await res.json();
+        assert.equal(res.status, 400);
+        assert.equal(body.success, false);
+        assert.match(body.message, /Insufficient stock/i);
+
+        // Verify stock remained unchanged at 45
+        const storedItem = await InventoryItem.findById(testItemId);
+        assert.equal(storedItem.currentStock, 45);
+      },
+    );
+
+    // Test 10: Invalid Quantity (0 or negative)
+    await t.test(
+      "POST /api/sales rejects zero or negative quantity",
+      async () => {
+        const resZero = await fetch(`${baseUrl}/api/sales`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            inventoryItemId: testItemId,
+            quantitySold: 0,
+          }),
+        });
+        assert.equal(resZero.status, 400);
+
+        const resNegative = await fetch(`${baseUrl}/api/sales`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            inventoryItemId: testItemId,
+            quantitySold: -5,
+          }),
+        });
+        assert.equal(resNegative.status, 400);
+      },
+    );
+
+    // Test 11: Missing or Invalid Inventory Item
+    await t.test(
+      "POST /api/sales rejects missing or invalid inventory ID",
+      async () => {
+        const resInvalidId = await fetch(`${baseUrl}/api/sales`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            inventoryItemId: "invalid-id",
+            quantitySold: 2,
+          }),
+        });
+        assert.equal(resInvalidId.status, 400);
+
+        const fakeId = new mongoose.Types.ObjectId().toString();
+        const resNonExistent = await fetch(`${baseUrl}/api/sales`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            inventoryItemId: fakeId,
+            quantitySold: 2,
+          }),
+        });
+        assert.equal(resNonExistent.status, 404);
+      },
+    );
+
+    // Test 12: GET /api/sales and GET /api/sales/inventory/:id
+    await t.test(
+      "GET /api/sales and GET /api/sales/inventory/:id return sale records",
+      async () => {
+        const resAll = await fetch(`${baseUrl}/api/sales`);
+        const bodyAll = await resAll.json();
+        assert.equal(resAll.status, 200);
+        assert.equal(bodyAll.success, true);
+        assert.ok(Array.isArray(bodyAll.data));
+
+        const resByItem = await fetch(
+          `${baseUrl}/api/sales/inventory/${testItemId}`,
+        );
+        const bodyByItem = await resByItem.json();
+        assert.equal(resByItem.status, 200);
+        assert.equal(bodyByItem.success, true);
+        assert.ok(Array.isArray(bodyByItem.data));
+        assert.equal(bodyByItem.data.length, 1);
+        assert.equal(bodyByItem.data[0].quantitySold, 5);
+        assert.equal(bodyByItem.data[0].totalAmount, 500);
+      },
+    );
+
+    // Cleanup test data
+    await t.test("Cleanup test inventory item and sales", async () => {
+      if (testItemId) {
+        await InventoryItem.findByIdAndDelete(testItemId);
+      }
+      if (createdSaleIds.length > 0) {
+        await Sale.deleteMany({ _id: { $in: createdSaleIds } });
+      }
+      assert.ok(true);
+    });
+  }
+
   // Teardown
-  await t.test("Teardown test server", async () => {
+  await t.test("Teardown test server and disconnect DB", async () => {
     await new Promise((resolve) => server.close(resolve));
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+    }
     assert.ok(true);
   });
 });

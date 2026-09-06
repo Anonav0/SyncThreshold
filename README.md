@@ -151,6 +151,8 @@ The client will run on `http://localhost:5173`.
 
 ### Base URL: `http://localhost:5000/api`
 
+#### Inventory Endpoints
+
 | Method   | Endpoint         | Description                   | Status Codes        |
 | -------- | ---------------- | ----------------------------- | ------------------- |
 | `GET`    | `/health`        | Check API server status       | `200`               |
@@ -160,7 +162,48 @@ The client will run on `http://localhost:5173`.
 | `PUT`    | `/inventory/:id` | Update inventory item details | `200`, `404`, `400` |
 | `DELETE` | `/inventory/:id` | Remove an inventory item      | `200`, `404`, `400` |
 
+#### Sales Endpoints (Phase 2)
+
+| Method | Endpoint                            | Description                                   | Status Codes        |
+| ------ | ----------------------------------- | --------------------------------------------- | ------------------- |
+| `POST` | `/sales`                            | Record sale and atomically reduce stock       | `201`, `400`, `404` |
+| `GET`  | `/sales`                            | Retrieve all sales history records            | `200`               |
+| `GET`  | `/sales/:id`                        | Retrieve single sale record by ID             | `200`, `404`, `400` |
+| `GET`  | `/sales/inventory/:inventoryItemId` | Retrieve sales history for a specific product | `200`, `400`        |
+
 ### Sample Payloads
+
+#### Record a Sale (`POST /api/sales`):
+
+```json
+{
+  "inventoryItemId": "67cc244d4715b74c87123456",
+  "quantitySold": 5
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "sale": {
+      "_id": "...",
+      "inventoryItemId": { "name": "Cotton Yarn Spools", "sku": "YARN-001" },
+      "quantitySold": 5,
+      "unitPrice": 120,
+      "totalAmount": 600,
+      "soldAt": "2026-09-06T11:00:00.000Z"
+    },
+    "inventory": {
+      "_id": "...",
+      "name": "Cotton Yarn Spools",
+      "currentStock": 245
+    }
+  }
+}
+```
 
 #### Create Item (`POST /api/inventory`):
 
@@ -177,30 +220,11 @@ The client will run on `http://localhost:5173`.
 }
 ```
 
-#### Standard Success Response:
-
-```json
-{
-  "success": true,
-  "data": { ... }
-}
-```
-
-#### Standard Error Response:
-
-```json
-{
-  "success": false,
-  "message": "Inventory item not found"
-}
-```
-
 ---
 
-## Architecture & Future AI Readiness
+## Architecture & Phase 3 Velocity Readiness
 
-In accordance with Phase 1 constraints:
-
-- AI analysis, Twilio notifications, and automated cron workers are **not** implemented in this phase.
-- An architectural stub at `server/src/services/aiService.js` is isolated and prepared for the upcoming Google Gemini API integration in Phase 2.
-- Express route controllers do not communicate directly with external providers, guaranteeing modularity and clean separation of concerns.
+- **Inventory-Sales Consistency**: Product sales atomically deduct stock with MongoDB concurrency protection (`$inc` condition `{ currentStock: { $gte: quantitySold } }`). Stock can never become negative.
+- **Sales History Logging**: Every sale captures snapshot unit price, quantity, calculated total amount, and timestamp.
+- **Phase 3 Readiness**: The `GET /api/sales/inventory/:inventoryItemId` endpoint provides historical sale velocity data, ready for consumption by Phase 3 automated reorder algorithms and Google Gemini risk analysis.
+- **No Early AI / Cron Logic**: Automated cron jobs, Twilio WhatsApp notifications, and AI risk scoring remain cleanly partitioned for subsequent phases.

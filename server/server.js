@@ -10,6 +10,7 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 const connectDB = require("./src/config/database");
 const inventoryRoutes = require("./src/routes/inventoryRoutes");
+const salesRoutes = require("./src/routes/salesRoutes");
 const errorHandler = require("./src/utils/errorHandler");
 
 const app = express();
@@ -28,6 +29,7 @@ app.get("/api/health", (req, res) => {
 
 // API Routes
 app.use("/api/inventory", inventoryRoutes);
+app.use("/api/sales", salesRoutes);
 
 // Catch-all 404 handler for undefined routes
 app.use("*", (req, res) => {

@@ -8,16 +8,19 @@ import {
   AlertCircle,
   CheckCircle2,
   PackageOpen,
+  ShoppingCart,
 } from "lucide-react";
 import inventoryService from "../services/inventoryService";
 import InventoryModal from "../components/InventoryModal";
 import StockUpdateModal from "../components/StockUpdateModal";
+import RecordSaleModal from "../components/RecordSaleModal";
 
 export default function Inventory({ items, loading, error, onRefresh }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [stockModalItem, setStockModalItem] = useState(null);
+  const [sellModalItem, setSellModalItem] = useState(null);
   const [bannerMessage, setBannerMessage] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
 
@@ -281,6 +284,15 @@ export default function Inventory({ items, loading, error, onRefresh }) {
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end space-x-2">
                         <button
+                          onClick={() => setSellModalItem(item)}
+                          disabled={item.currentStock <= 0}
+                          className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors border border-emerald-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Record sale for this product"
+                        >
+                          <ShoppingCart className="w-3.5 h-3.5 mr-1" />
+                          Sell
+                        </button>
+                        <button
                           onClick={() => setStockModalItem(item)}
                           className="inline-flex items-center px-2.5 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors border border-indigo-200"
                           title="Update stock levels"
@@ -321,6 +333,18 @@ export default function Inventory({ items, loading, error, onRefresh }) {
         item={stockModalItem}
         isOpen={!!stockModalItem}
         onClose={() => setStockModalItem(null)}
+        onSuccess={(msg) => {
+          showNotification(msg);
+          onRefresh();
+        }}
+      />
+
+      {/* Record Sale Modal */}
+      <RecordSaleModal
+        isOpen={!!sellModalItem}
+        onClose={() => setSellModalItem(null)}
+        items={items}
+        preselectedItem={sellModalItem}
         onSuccess={(msg) => {
           showNotification(msg);
           onRefresh();
